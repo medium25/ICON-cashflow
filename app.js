@@ -16,6 +16,7 @@ const STORAGE = {
 };
 
 const METHODS = ['Наличка', 'Click', 'Терминал'];
+const METHOD_PHRASE = { 'Наличка': 'в наличке', 'Click': 'в Click', 'Терминал': 'по терминалу' };
 
 const fmt = (n) => Math.round(n || 0).toLocaleString('ru-RU');
 const fmtSigned = (n) => n > 0 ? `-${fmt(n)}` : '—';
@@ -134,18 +135,35 @@ function paidThisMonthByName(name, month) {
 
 // ---------- mutations ----------
 
-function addRow(name, due) {
+function addRow(name, due, payDate, comment) {
   const rows = getRows();
-  rows.push({ id: uid(), name, due });
+  rows.push({ id: uid(), name, due, payDate: payDate || '', comment: comment || '' });
   save(STORAGE.rows, rows);
 }
-function editRow(id, name, due) {
+function editRow(id, name, due, payDate) {
   const rows = getRows();
   const row = rows.find(r => r.id === id);
-  if (row) { row.name = name; row.due = due; save(STORAGE.rows, rows); }
+  if (row) { row.name = name; row.due = due; row.payDate = payDate || ''; save(STORAGE.rows, rows); }
+}
+function setRowComment(id, comment) {
+  const rows = getRows();
+  const row = rows.find(r => r.id === id);
+  if (row) { row.comment = comment; save(STORAGE.rows, rows); }
+}
+function toggleRowDebt(id) {
+  const rows = getRows();
+  const row = rows.find(r => r.id === id);
+  if (row) { row.isDebt = !row.isDebt; save(STORAGE.rows, rows); }
 }
 function deleteRow(id) {
   save(STORAGE.rows, getRows().filter(r => r.id !== id));
+}
+// "Новый месяц" — soft-deletes every active expense so "Отдали в этом месяце"
+// zeroes out for all rows, while История still keeps the full record
+function startNewMonth() {
+  const list = getExpenses();
+  list.forEach(e => { if (!e.deleted) { e.deleted = true; e.deletedAt = Date.now(); } });
+  save(STORAGE.expenses, list);
 }
 function moveRow(id, toIndex) {
   const rows = getRows();
@@ -181,6 +199,7 @@ function setExpenseComment(id, comment) {
 
 let editingRowId = null;
 let openSourceForm = null; // method whose "+ добавить источник" form is open
+let openRowMenuId = null; // debt-row whose ⋯ actions menu is open
 
 // ---------- category name autocomplete popup ----------
 
@@ -250,7 +269,7 @@ function renderMethods() {
     return `
       <div class="method-block" data-method="${method}">
         <div class="method-col stripe-green">
-          <div class="col-head">${method}</div>
+          <div class="col-head">Доходы ${METHOD_PHRASE[method]}</div>
           <div class="balance-rows">
             <div class="balance-row">
               <span class="balance-label">Было</span>
@@ -274,7 +293,7 @@ function renderMethods() {
           </div>
         </div>
         <div class="method-col stripe-red">
-          <div class="col-head">${method}</div>
+          <div class="col-head">Расходы ${METHOD_PHRASE[method]}</div>
           <div class="cat-list">${rowsHtml}</div>
           <form class="cat-add-row" data-expense-form="${method}">
             <div class="autocomplete" data-autocomplete>
@@ -287,7 +306,7 @@ function renderMethods() {
           <div class="cat-sum-row"><span></span><span>Сумма</span><span>${fmt(catSum)}</span></div>
         </div>
         <div class="method-col stripe-blue">
-          <div class="col-head">${method}</div>
+          <div class="col-head">Остаток ${METHOD_PHRASE[method]}</div>
           <div class="result-value">
             <span class="result-number">${fmt(remainder)}</span>
             <span class="unit">so'm</span>
@@ -387,8 +406,9 @@ function renderRow(r) {
   if (editingRowId === r.id) {
     return `
       <tr class="editing">
-        <td colspan="7">
+        <td colspan="8">
           <form class="edit-form" data-edit="${r.id}">
+            <input type="text" name="payDate" value="${escapeHtml(r.payDate || '')}" placeholder="Дата (любая, 5 число...)">
             <input type="text" name="name" value="${escapeHtml(r.name)}" required placeholder="Название">
             <input type="text" inputmode="numeric" name="due" value="${fmt(r.due)}" data-amount required placeholder="Должны">
             <button type="submit" class="btn-icon" title="Сохранить">✓</button>
@@ -399,17 +419,24 @@ function renderRow(r) {
     `;
   }
 
+  const menuOpen = openRowMenuId === r.id;
   return `
     <tr data-row-id="${r.id}">
       <td class="drag-col"><span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span></td>
-      <td>${escapeHtml(r.name)}</td>
+      <td class="date-cell">${escapeHtml(r.payDate || '—')}</td>
+      <td>${r.isDebt ? `<span class="debt-dot" title="Долг"></span>` : ''}${escapeHtml(r.name)}${r.comment ? `<span class="info-icon" data-view-comment="${r.id}" title="${escapeHtml(r.comment)}">i</span>` : ''}</td>
       <td class="num due-cell">${fmt(r.due)}</td>
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
       <td class="actions-cell">
-        <button class="btn-icon" data-edit-row="${r.id}" title="Редактировать">✎</button>
-        <button class="btn-icon" data-del-row="${r.id}" title="Удалить">✕</button>
+        <button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>
+        <div class="row-menu ${menuOpen ? '' : 'hidden'}" data-row-menu="${r.id}">
+          <button data-edit-row="${r.id}">✎ Редактировать</button>
+          <button data-mark-debt="${r.id}">${r.isDebt ? '● Убрать пометку долга' : '● Пометить как долг'}</button>
+          <button data-comment-row="${r.id}">💬 Комментарий</button>
+          <button data-del-row="${r.id}" class="danger">✕ Удалить</button>
+        </div>
       </td>
     </tr>
   `;
@@ -424,7 +451,7 @@ function renderExpenseTable() {
 
   tbody.innerHTML = rows.length
     ? rows.map(renderRow).join('')
-    : `<tr><td colspan="7" class="empty-hint">Пока нет статей. Нажмите «+ Добавить», чтобы добавить первую.</td></tr>`;
+    : `<tr><td colspan="8" class="empty-hint">Пока нет статей. Нажмите «+ Добавить», чтобы добавить первую.</td></tr>`;
 
   const due = rows.reduce((s, r) => s + r.due, 0);
   const today = rows.reduce((s, r) => s + paidTodayByName(r.name, date), 0);
@@ -432,6 +459,7 @@ function renderExpenseTable() {
   const diff = due - monthPaid;
   tfoot.innerHTML = rows.length ? `
     <tr>
+      <td></td>
       <td></td>
       <td>Итого</td>
       <td class="num">${fmt(due)}</td>
@@ -443,11 +471,12 @@ function renderExpenseTable() {
   ` : '';
 
   tbody.querySelectorAll('[data-edit-row]').forEach(btn => {
-    btn.addEventListener('click', () => { editingRowId = btn.dataset.editRow; renderAll(); });
+    btn.addEventListener('click', () => { editingRowId = btn.dataset.editRow; openRowMenuId = null; renderAll(); });
   });
   tbody.querySelectorAll('[data-del-row]').forEach(btn => {
     btn.addEventListener('click', () => {
       const row = rows.find(r => r.id === btn.dataset.delRow);
+      openRowMenuId = null;
       if (!row || !confirm(`Удалить «${row.name}»?`)) return;
       deleteRow(btn.dataset.delRow);
       renderAll();
@@ -463,9 +492,41 @@ function renderExpenseTable() {
       const name = form.name.value.trim();
       const due = parseAmount(form.due);
       if (!name) return;
-      editRow(id, name, due || 0);
+      editRow(id, name, due || 0, form.payDate.value.trim());
       editingRowId = null;
       renderAll();
+    });
+  });
+  tbody.querySelectorAll('[data-comment-row]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = rows.find(r => r.id === btn.dataset.commentRow);
+      const next = prompt('Комментарий:', row.comment || '');
+      openRowMenuId = null;
+      if (next === null) { renderAll(); return; }
+      setRowComment(row.id, next.trim());
+      renderAll();
+    });
+  });
+  tbody.querySelectorAll('[data-mark-debt]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      toggleRowDebt(btn.dataset.markDebt);
+      openRowMenuId = null;
+      renderAll();
+    });
+  });
+  tbody.querySelectorAll('[data-row-menu-toggle]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.rowMenuToggle;
+      openRowMenuId = openRowMenuId === id ? null : id;
+      renderAll();
+      if (openRowMenuId) {
+        const menu = tbody.querySelector(`[data-row-menu="${openRowMenuId}"]`);
+        const rect = btn.getBoundingClientRect();
+        menu.style.position = 'fixed';
+        menu.style.top = `${rect.bottom + 4}px`;
+        menu.style.right = `${window.innerWidth - rect.right}px`;
+      }
     });
   });
 
@@ -636,7 +697,16 @@ function setupGlobalEvents() {
     if (e.target === historyOverlay) historyOverlay.classList.add('hidden');
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') historyOverlay.classList.add('hidden');
+    if (e.key === 'Escape') {
+      historyOverlay.classList.add('hidden');
+      if (openRowMenuId) { openRowMenuId = null; renderAll(); }
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (openRowMenuId && !e.target.closest('.row-menu') && !e.target.closest('[data-row-menu-toggle]')) {
+      openRowMenuId = null;
+      renderAll();
+    }
   });
   document.querySelectorAll('[data-history-tab]').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -649,6 +719,11 @@ function setupGlobalEvents() {
     newRowForm.classList.toggle('hidden');
     if (!newRowForm.classList.contains('hidden')) document.getElementById('newRowName').focus();
   });
+  document.getElementById('newMonthBtn').addEventListener('click', () => {
+    if (!confirm('Перейти к новому месяцу? «Отдали в этом месяце» обнулится для всех статей (история сохранится).')) return;
+    startNewMonth();
+    renderAll();
+  });
   cancelBtn.addEventListener('click', () => {
     newRowForm.reset();
     newRowForm.classList.add('hidden');
@@ -657,8 +732,9 @@ function setupGlobalEvents() {
     e.preventDefault();
     const name = document.getElementById('newRowName').value.trim();
     const due = parseAmount(document.getElementById('newRowDue'));
+    const payDate = document.getElementById('newRowPayDate').value.trim();
     if (!name) return;
-    addRow(name, due || 0);
+    addRow(name, due || 0, payDate);
     newRowForm.reset();
     newRowForm.classList.add('hidden');
     renderAll();
@@ -705,6 +781,70 @@ function renderAll() {
   renderKpis();
 }
 
+// one-time import of the user's real spreadsheet data, requested explicitly —
+// only runs if there are no rows yet, never overwrites existing data
+function seedIfEmpty() {
+  if (getRows().length) return;
+  const monthStart = todayStr().slice(0, 8) + '01';
+  const r = (payDate, name, due, paid, comment) => {
+    addRow(name, due, payDate, comment || '');
+    if (paid > 0) addExpense('Наличка', name, paid);
+  };
+  const bumpDates = () => {
+    const list = getExpenses();
+    list.forEach(e => { if (e.date === todayStr()) e.date = monthStart; });
+    save(STORAGE.expenses, list);
+  };
+  r('любая', 'Мукаддас июнь (долг)', 3850000, 500000, '24 май-23 июнь');
+  r('любая', 'Камолиддин май (долг)', 1500000, 1500000, '25 апрель- 24 май');
+  r('любая', 'Камолиддин июнь (долг)', 4500000, 1000000, '25 май - 24 июнь');
+  r('любая', 'Хонзода июнь (долг)', 4000000, 4000000, '');
+  r('любая', 'Муслима марк июнь (долг)', 2500000, 2000000, '15 май-14 июнь');
+  r('любая', 'Аренда май (долг)', 6000000, 6000000, 'Май');
+  r('любая', 'Аренда Асф июнь (долг)', 2100000, 2100000, '');
+  r('любая', 'Аренда стом июнь (долг)', 1200000, 1200000, '');
+  r('любая', 'Аренда июнь (долг)', 18000000, 0, '');
+  r('любая', 'Зиеда (долг)', 1700000, 1700000, '');
+  r('любая', 'Дониёр май (долг)', 7750000, 6350000, '');
+  r('любая', 'Садулло ака май (долг)', 4652000, 4652000, '');
+  r('любая', 'Умар (долг)', 1200000, 1200000, '');
+  r('любая', 'Налоги Бахти 670$ (долг)', 5550000, 2430000, '');
+  r('любая', 'Долг (10 млн)', 10195000, 10195000, '');
+  r('любая', 'Баннеры (долг)', 10000000, 0, '');
+  r('5 число', 'Кристина', 6250000, 5250000, '');
+  r('5 число', 'Санжар', 4500000, 4500000, '(6 по 4)');
+  r('6 число', 'Азизбек', 4000000, 4000000, '');
+  r('10 число', 'Шахзода', 5773000, 2800000, '');
+  r('10 число', 'Огилой', 3410000, 2000000, '-790000');
+  r('10 число', 'Огилой утро', 466000, 466000, 'за утро');
+  r('10 число', 'Рухшона', 1500000, 1500000, '');
+  r('10 число', 'Уборщица', 1500000, 500000, '');
+  r('10 число', 'Умар', 1200000, 0, '');
+  r('11 число', 'Зиёда', 4000000, 1000000, '(с 11 по 10) (2300-2)');
+  r('15 число', 'Муслима админ', 3500000, 0, '');
+  r('16 число', 'Тариф', 155000, 0, '');
+  r('20 число', 'Мардона', 4700000, 0, '');
+  r('20 число', 'Аренда июль', 18000000, 0, '');
+  r('23 число', 'Иброхим', 4200000, 0, '');
+  r('25 число', 'Камолиддин', 4500000, 0, '');
+  r('26 число', 'Мукаддас', 4200000, 0, '-2 дня');
+  r('26 число', 'Муслима оператор', 4500000, 0, '');
+  r('любая', 'Дониёр июнь', 10000000, 0, '');
+  r('любая', 'Садулло ака июнь', 12000000, 4158000, '');
+  r('любая', 'HR расходы', 600000, 636000, '');
+  r('4 число', 'Wi-fi', 190000, 190000, '');
+  r('любая', 'Таргет', 8000000, 4210000, '');
+  r('3 число', 'CRM', 0, 0, '');
+  r('любая', 'Налоги', 4000000, 0, '');
+  r('любая', 'Возврат ученикам', 1000000, 0, '');
+  r('любая', 'Книги', 0, 0, '');
+  r('любая', 'Вода и станаканы', 160000, 160000, '');
+  r('любая', 'Электричество', 0, 0, '');
+  r('любая', 'Прочие', 800000, 302000, '');
+  bumpDates(); // backdate to the 1st of the month so today's cards stay empty
+}
+
 setDateDisplay();
 setupGlobalEvents();
+seedIfEmpty();
 renderAll();
