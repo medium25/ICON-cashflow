@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Учёт долгов / Кэшфлоу</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Учёт долгов</h1>
+    <div class="topbar-actions">
+      <button id="newRowBtn" class="btn btn-primary">+ Новая строка</button>
+      <button id="newDayBtn" class="btn">Новый день</button>
+      <button id="newMonthBtn" class="btn btn-danger">Новый месяц</button>
+      <input id="searchInput" type="text" placeholder="Поиск..." class="search-input">
+    </div>
+  </header>
+
+  <main>
+    <div class="table-wrap">
+      <table id="cashTable">
+        <thead>
+          <tr>
+            <th class="col-name">Наименования</th>
+            <th class="col-money">Должны</th>
+            <th class="col-money">Отдали Сегодня</th>
+            <th class="col-money">Отдали в этом месяце</th>
+            <th class="col-money">Разница</th>
+            <th class="col-actions"></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+        <tfoot>
+          <tr id="totalsRow">
+            <td>Итого</td>
+            <td id="totalOwed">so'm 0</td>
+            <td id="totalToday">so'm 0</td>
+            <td id="totalMonth">so'm 0</td>
+            <td id="totalDiff">so'm 0</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
