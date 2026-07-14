@@ -3,50 +3,87 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Учёт долгов / Кэшфлоу</title>
+<title>Cashflow Tracker</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<div class="app">
+
   <header class="topbar">
-    <h1>Учёт долгов</h1>
-    <div class="topbar-actions">
-      <button id="newRowBtn" class="btn btn-primary">+ Новая строка</button>
-      <button id="newDayBtn" class="btn">Новый день</button>
-      <button id="newMonthBtn" class="btn btn-danger">Новый месяц</button>
-      <input id="searchInput" type="text" placeholder="Поиск..." class="search-input">
+    <h1>Cashflow Tracker</h1>
+    <div class="topbar-right">
+      <div class="date-display" id="todayDate"></div>
+      <button id="historyBtn" class="btn btn-secondary">История</button>
     </div>
   </header>
 
-  <main>
-    <div class="table-wrap">
-      <table id="cashTable">
-        <thead>
-          <tr>
-            <th class="col-name">Наименования</th>
-            <th class="col-money">Должны</th>
-            <th class="col-money">Отдали Сегодня</th>
-            <th class="col-money">Отдали в этом месяце</th>
-            <th class="col-money">Разница</th>
-            <th class="col-actions"></th>
-          </tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-        <tfoot>
-          <tr id="totalsRow">
-            <td>Итого</td>
-            <td id="totalOwed">so'm 0</td>
-            <td id="totalToday">so'm 0</td>
-            <td id="totalMonth">so'm 0</td>
-            <td id="totalDiff">so'm 0</td>
-            <td></td>
-          </tr>
-        </tfoot>
-      </table>
+  <div id="historyOverlay" class="modal-overlay hidden">
+    <div class="modal modal-lg">
+      <div class="modal-head">
+        <h2>История транзакций</h2>
+        <button id="closeHistory" class="btn-icon" title="Закрыть">✕</button>
+      </div>
+      <p class="modal-hint">Каждая транзакция — источник, время и дата ввода. Удалённые показаны зачёркнутыми.</p>
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-history-tab="expense">Расходы</button>
+        <button class="modal-tab" data-history-tab="income">Доходы</button>
+      </div>
+      <div id="historyBody" class="modal-body"></div>
     </div>
-  </main>
+  </div>
 
-  <div id="toast" class="toast"></div>
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Поступило</div>
+      <div class="kpi-value" id="kpiIn">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Потратили сегодня</div>
+      <div class="kpi-value" id="kpiOut">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Осталось</div>
+      <div class="kpi-value" id="kpiLeft">0</div>
+    </div>
+  </div>
 
-  <script src="app.js"></script>
+  <div class="methods-row" id="methodsRow">
+    <!-- 3 method blocks (Категории / Было-Поступило / Остаток), filled by JS -->
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Наименования</h2>
+      <button id="toggleAddRow" class="btn btn-secondary">+ Добавить</button>
+    </div>
+
+    <form id="newRowForm" class="inline-form hidden">
+      <input type="text" id="newRowName" placeholder="Название" required>
+      <input type="text" inputmode="numeric" id="newRowDue" placeholder="Должны" data-amount required>
+      <button type="submit" class="btn btn-primary">Добавить</button>
+      <button type="button" id="cancelAddRow" class="btn btn-secondary">Отмена</button>
+    </form>
+
+    <table class="data-table expense-table">
+      <thead>
+        <tr>
+          <th class="drag-col"></th>
+          <th>Наименования</th>
+          <th class="num">Должны</th>
+          <th class="num">Отдали Сегодня</th>
+          <th class="num">Отдали в этом месяце</th>
+          <th class="num">Разница</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="expenseTableBody"></tbody>
+      <tfoot id="expenseTableFoot"></tfoot>
+    </table>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
