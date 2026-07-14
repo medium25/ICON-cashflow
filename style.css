@@ -249,6 +249,7 @@ body {
 .method-col.stripe-green::before { background: var(--green); box-shadow: 0 0 9px 1px var(--green); }
 .method-col.stripe-red::before { background: var(--red); box-shadow: 0 0 9px 1px var(--red); }
 .method-col.stripe-blue::before { background: var(--accent); box-shadow: 0 0 9px 1px var(--accent); }
+:root:not([data-theme="dark"]) .method-col::before { box-shadow: none; }
 
 /* children that sit at the card's rounded top/bottom edges need their own
    matching radius now that the card no longer clips its content */
