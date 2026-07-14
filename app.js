@@ -507,6 +507,12 @@ function renderExpenseTable() {
       renderAll();
     });
   });
+  tbody.querySelectorAll('[data-view-comment]').forEach(icon => {
+    icon.addEventListener('click', () => {
+      const row = rows.find(r => r.id === icon.dataset.viewComment);
+      if (row) alert(row.comment);
+    });
+  });
   tbody.querySelectorAll('[data-mark-debt]').forEach(btn => {
     btn.addEventListener('click', () => {
       toggleRowDebt(btn.dataset.markDebt);
@@ -518,11 +524,14 @@ function renderExpenseTable() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.dataset.rowMenuToggle;
-      openRowMenuId = openRowMenuId === id ? null : id;
+      const opening = openRowMenuId !== id;
+      // capture the button's position BEFORE renderAll() replaces the DOM —
+      // afterwards this button no longer exists, so its rect would read 0,0
+      const rect = btn.getBoundingClientRect();
+      openRowMenuId = opening ? id : null;
       renderAll();
-      if (openRowMenuId) {
-        const menu = tbody.querySelector(`[data-row-menu="${openRowMenuId}"]`);
-        const rect = btn.getBoundingClientRect();
+      if (opening) {
+        const menu = tbody.querySelector(`[data-row-menu="${id}"]`);
         menu.style.position = 'fixed';
         menu.style.top = `${rect.bottom + 4}px`;
         menu.style.right = `${window.innerWidth - rect.right}px`;
@@ -844,7 +853,21 @@ function seedIfEmpty() {
   bumpDates(); // backdate to the 1st of the month so today's cards stay empty
 }
 
+function initTheme() {
+  const saved = localStorage.getItem('cf_theme') || 'light';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('themeToggle');
+  btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+  btn.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('cf_theme', next);
+    btn.textContent = next === 'dark' ? '☀️' : '🌙';
+  });
+}
+
 setDateDisplay();
 setupGlobalEvents();
 seedIfEmpty();
 renderAll();
+initTheme();
