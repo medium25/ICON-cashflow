@@ -227,21 +227,38 @@ body {
    own border-radius automatically) identifies the section instead of a
    bordered pill — less glare than an outline, same at-a-glance color coding. */
 .method-col {
+  position: relative;
   background: var(--surface);
   border-radius: var(--radius-lg);
-  /* smaller radius on the left corners only — with the full 20px radius a
-     4px stripe visibly recedes into the curve near the top/bottom instead
-     of running the full height */
-  border-top-left-radius: 8px;
-  border-bottom-left-radius: 8px;
   box-shadow: var(--shadow);
-  overflow: hidden;
+  /* no overflow:hidden here — a box-shadow/clip always follows the card's
+     own border-radius and recedes at the corners. The stripe is a plain
+     ::before rectangle instead, unrounded, so it runs the full height. */
   display: flex;
   flex-direction: column;
 }
-.method-col.stripe-green { box-shadow: var(--shadow), inset 4px 0 0 var(--green); }
-.method-col.stripe-red { box-shadow: var(--shadow), inset 4px 0 0 var(--red); }
-.method-col.stripe-blue { box-shadow: var(--shadow), inset 4px 0 0 var(--accent); }
+.method-col::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  border-radius: 999px;
+}
+.method-col.stripe-green::before { background: var(--green); box-shadow: 0 0 9px 1px var(--green); }
+.method-col.stripe-red::before { background: var(--red); box-shadow: 0 0 9px 1px var(--red); }
+.method-col.stripe-blue::before { background: var(--accent); box-shadow: 0 0 9px 1px var(--accent); }
+
+/* children that sit at the card's rounded top/bottom edges need their own
+   matching radius now that the card no longer clips its content */
+.method-col .col-head:first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
+.method-col .balance-row.sum:last-child,
+.method-col .cat-sum-row:last-child,
+.method-col .result-value:last-child {
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
 
 .col-head {
   font-size: 13px;
@@ -545,6 +562,7 @@ body {
   justify-content: space-between;
   margin-bottom: 18px;
 }
+.panel-head-actions { display: flex; gap: 8px; }
 .panel-head h2 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 
 .inline-form {
@@ -611,6 +629,24 @@ body {
 
 .expense-table td.num { font-weight: 700; }
 .due-cell { color: var(--text); }
+.date-cell { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--surface-tint);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+  font-weight: 700;
+  cursor: help;
+  vertical-align: middle;
+}
 .today-cell { color: var(--accent); font-weight: 700; }
 .month-cell { color: var(--green); font-weight: 700; }
 
@@ -653,6 +689,44 @@ body {
   transition: background 0.12s ease, color 0.12s ease;
 }
 .btn-icon:hover { background: var(--border); color: var(--text); }
+
+.row-menu {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  padding: 6px;
+}
+.row-menu.hidden { display: none; }
+.row-menu button {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.row-menu button:hover { background: var(--surface-tint); }
+.row-menu button.danger { color: var(--red); }
+.row-menu button.danger:hover { background: var(--red-soft); }
+
+.debt-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 6px 1px var(--red);
+  margin-right: 8px;
+  vertical-align: middle;
+}
 
 .edit-form {
   display: flex;

@@ -11,7 +11,7 @@
 <div class="app">
 
   <header class="topbar">
-    <h1>Cashflow Tracker</h1>
+    <h1>ICON FINANCE</h1>
     <div class="topbar-right">
       <div class="date-display" id="todayDate"></div>
       <button id="historyBtn" class="btn btn-secondary">История</button>
@@ -55,10 +55,14 @@
   <div class="panel">
     <div class="panel-head">
       <h2>Наименования</h2>
-      <button id="toggleAddRow" class="btn btn-secondary">+ Добавить</button>
+      <div class="panel-head-actions">
+        <button id="newMonthBtn" class="btn btn-secondary">Перейти к новому месяцу</button>
+        <button id="toggleAddRow" class="btn btn-secondary">+ Добавить</button>
+      </div>
     </div>
 
     <form id="newRowForm" class="inline-form hidden">
+      <input type="text" id="newRowPayDate" placeholder="Дата (любая, 5 число...)">
       <input type="text" id="newRowName" placeholder="Название" required>
       <input type="text" inputmode="numeric" id="newRowDue" placeholder="Должны" data-amount required>
       <button type="submit" class="btn btn-primary">Добавить</button>
@@ -69,6 +73,7 @@
       <thead>
         <tr>
           <th class="drag-col"></th>
+          <th>Дата</th>
           <th>Наименования</th>
           <th class="num">Должны</th>
           <th class="num">Отдали Сегодня</th>
