@@ -1,0 +1,23 @@
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local env / secrets (not used yet, but kept out just in case)
+.env
+.env.local
+
+# In case a bundler or package manager gets added later
+node_modules/
+dist/
+build/
