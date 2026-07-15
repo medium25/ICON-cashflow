@@ -61,7 +61,13 @@ function getBalances() { return load(STORAGE.balances, {}); }
 
 function getBalanceEntry(method, date) {
   const entry = getBalances()[`${method}_${date}`];
-  return entry ? { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [] } : { was: 0, income: 0, sources: [] };
+  if (entry) return { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [] };
+  // no record yet for this day — carry yesterday's Остаток into "Было", everything else starts at 0
+  const balances = getBalances();
+  const prefix = `${method}_`;
+  const priorDates = Object.keys(balances).filter(k => k.startsWith(prefix) && k.slice(prefix.length) < date).map(k => k.slice(prefix.length));
+  const prevDate = priorDates.sort().pop();
+  return { was: prevDate ? methodRemainder(method, prevDate) : 0, income: 0, sources: [] };
 }
 function saveBalanceEntry(method, date, entry) {
   const balances = getBalances();
@@ -435,6 +441,7 @@ function renderRow(r) {
           <button data-edit-row="${r.id}">✎ Редактировать</button>
           <button data-mark-debt="${r.id}">${r.isDebt ? '● Убрать пометку долга' : '● Пометить как долг'}</button>
           <button data-comment-row="${r.id}">💬 Комментарий</button>
+          <button data-fix-month="${r.id}">🔧 Исправить «Отдали в этом месяце»</button>
           <button data-del-row="${r.id}" class="danger">✕ Удалить</button>
         </div>
       </td>
@@ -517,6 +524,22 @@ function renderExpenseTable() {
     btn.addEventListener('click', () => {
       toggleRowDebt(btn.dataset.markDebt);
       openRowMenuId = null;
+      renderAll();
+    });
+  });
+  tbody.querySelectorAll('[data-fix-month]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      openRowMenuId = null;
+      const row = rows.find(r => r.id === btn.dataset.fixMonth);
+      const m = monthOf(todayStr());
+      const current = paidThisMonthByName(row.name, m);
+      const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
+      if (raw === null) { renderAll(); return; }
+      const next = Number(String(raw).replace(/\D/g, ''));
+      const code = prompt('Код подтверждения:');
+      if (code !== '1223') { alert('Неверный код'); renderAll(); return; }
+      const delta = next - current;
+      if (delta !== 0) addExpense('Корректировка', row.name, delta);
       renderAll();
     });
   });
