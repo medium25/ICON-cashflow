@@ -656,7 +656,7 @@ function renderHistoryFilters() {
   bar.innerHTML = `
     <div class="filter-group">${typeBtns}</div>
     <div class="filter-group">${methodBtns}</div>
-    <input type="date" id="historyDateFilter" value="${historyFilterDate}">
+    <input type="date" id="historyDateFilter" min="2020-01-01" max="2099-12-31" value="${historyFilterDate}">
     ${historyFilterDate ? '<button class="btn-icon" id="clearDateFilter" title="Сбросить дату">✕</button>' : ''}
   `;
   bar.querySelectorAll('[data-filter-type]').forEach(b => b.addEventListener('click', () => { historyFilterType = b.dataset.filterType; renderHistoryPage(); }));
