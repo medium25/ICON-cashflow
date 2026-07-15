@@ -178,6 +178,28 @@ body {
 .history-comment::placeholder { color: var(--text-muted); }
 .history-empty { color: var(--text-muted); font-size: 14px; padding: 30px 0; text-align: center; }
 
+.history-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; }
+.filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-chip {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-tint);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 590;
+  padding: 7px 14px;
+  border-radius: 980px;
+  cursor: pointer;
+}
+.filter-chip.active { background: var(--accent); color: white; border-color: var(--accent); }
+#historyDateFilter {
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
 /* KPI row — same column proportions as the method blocks below,
    so the two sections read as one continuous grid rhythm */
 .kpi-row {

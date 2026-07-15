@@ -639,16 +639,42 @@ function collectAllTransactions() {
     const entry = balances[key];
     if (entry.was) items.push({ kind: 'income', method, date, label: 'Было', amount: entry.was, ts: entry.wasTs });
     if (entry.income) items.push({ kind: 'income', method, date, label: 'Поступило', amount: entry.income, ts: entry.incomeTs });
-    (entry.sources || []).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts, deleted: s.deleted, deletedAt: s.deletedAt }));
+    (entry.sources || []).filter(s => !s.deleted).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts }));
   });
-  getExpenses().forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts, deleted: e.deleted, deletedAt: e.deletedAt }));
+  getExpenses().filter(e => !e.deleted).forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts }));
   return items;
 }
 
+let historyFilterType = 'all';   // all | income | expense
+let historyFilterMethod = 'all'; // all | Наличка | Click | Терминал
+let historyFilterDate = '';      // '' | YYYY-MM-DD
+
+function renderHistoryFilters() {
+  const bar = document.getElementById('historyFilters');
+  const typeBtns = ['all', 'income', 'expense'].map(t => `<button class="filter-chip ${historyFilterType === t ? 'active' : ''}" data-filter-type="${t}">${t === 'all' ? 'Все' : t === 'income' ? 'Доходы' : 'Расходы'}</button>`).join('');
+  const methodBtns = ['all', ...METHODS].map(m => `<button class="filter-chip ${historyFilterMethod === m ? 'active' : ''}" data-filter-method="${m}">${m === 'all' ? 'Все' : m}</button>`).join('');
+  bar.innerHTML = `
+    <div class="filter-group">${typeBtns}</div>
+    <div class="filter-group">${methodBtns}</div>
+    <input type="date" id="historyDateFilter" value="${historyFilterDate}">
+    ${historyFilterDate ? '<button class="btn-icon" id="clearDateFilter" title="Сбросить дату">✕</button>' : ''}
+  `;
+  bar.querySelectorAll('[data-filter-type]').forEach(b => b.addEventListener('click', () => { historyFilterType = b.dataset.filterType; renderHistoryPage(); }));
+  bar.querySelectorAll('[data-filter-method]').forEach(b => b.addEventListener('click', () => { historyFilterMethod = b.dataset.filterMethod; renderHistoryPage(); }));
+  bar.querySelector('#historyDateFilter').addEventListener('change', (e) => { historyFilterDate = e.target.value; renderHistoryPage(); });
+  const clearBtn = bar.querySelector('#clearDateFilter');
+  if (clearBtn) clearBtn.addEventListener('click', () => { historyFilterDate = ''; renderHistoryPage(); });
+}
+
 function renderHistoryPage() {
+  renderHistoryFilters();
   const container = document.getElementById('historyList');
-  const items = collectAllTransactions();
-  if (!items.length) { container.innerHTML = `<div class="history-empty">Пока нет транзакций</div>`; return; }
+  let items = collectAllTransactions();
+  if (historyFilterType !== 'all') items = items.filter(it => it.kind === historyFilterType);
+  if (historyFilterMethod !== 'all') items = items.filter(it => it.method === historyFilterMethod);
+  if (historyFilterDate) items = items.filter(it => it.date === historyFilterDate);
+
+  if (!items.length) { container.innerHTML = `<div class="history-empty">Ничего не найдено</div>`; return; }
 
   const byDate = {};
   items.forEach(it => { (byDate[it.date] = byDate[it.date] || []).push(it); });
@@ -657,13 +683,13 @@ function renderHistoryPage() {
   container.innerHTML = dates.map(date => {
     const dayItems = byDate[date].slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
     const cards = dayItems.map(it => `
-      <div class="history-card ${it.deleted ? 'deleted' : ''}">
+      <div class="history-card">
         <div class="history-card-top">
           <span class="history-method">${it.kind === 'income' ? 'Доход' : 'Расход'} ${escapeHtml(it.method)}</span>
           <span class="history-name">${escapeHtml(it.label || '—')}</span>
           <span class="history-amount ${it.kind === 'income' ? 'amount-pos' : 'amount-neg'}">${it.kind === 'income' ? '+' : '-'}${fmt(it.amount)}</span>
         </div>
-        <div class="history-meta">${timeLabel(it.ts)}${it.deleted ? ` <span class="history-deleted-tag">Удалено ${timeLabel(it.deletedAt)}</span>` : ''}</div>
+        <div class="history-meta">${timeLabel(it.ts)}</div>
       </div>
     `).join('');
     return `<div class="history-day"><div class="history-day-label">${dateLabel(date)}</div>${cards}</div>`;
