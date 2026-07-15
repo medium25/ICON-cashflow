@@ -621,13 +621,13 @@ body {
 .btn-secondary { background: var(--surface-tint); color: var(--text); border: 1px solid var(--border-strong); }
 .btn-secondary:hover { background: var(--border); }
 
-.expense-table {
+.expense-table, .debt-summary-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 14px;
 }
-.expense-table th {
+.expense-table th, .debt-summary-table th {
   background: transparent;
   color: var(--text-muted);
   text-align: left;
@@ -638,17 +638,18 @@ body {
   padding: 0 12px 12px;
   border-bottom: 1px solid var(--border-strong);
 }
-.expense-table th.num, .expense-table td.num { text-align: right; }
+.expense-table th.num, .expense-table td.num,
+.debt-summary-table th.num, .debt-summary-table td.num { text-align: right; }
 .expense-table th.drag-col { width: 28px; padding-left: 12px; }
-.expense-table td {
+.expense-table td, .debt-summary-table td {
   padding: 14px 12px;
   border-bottom: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
 }
-.expense-table tbody tr:hover { background: var(--surface-tint); }
-.expense-table tr:last-child td { border-bottom: none; }
+.expense-table tbody tr:hover, .debt-summary-table tbody tr:hover { background: var(--surface-tint); }
+.expense-table tr:last-child td, .debt-summary-table tr:last-child td { border-bottom: none; }
 
-.expense-table td.num { font-weight: 700; }
+.expense-table td.num, .debt-summary-table td.num { font-weight: 700; }
 .due-cell { color: var(--text); }
 .date-cell { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 .info-icon {
@@ -767,12 +768,16 @@ body {
 .edit-form input[name="name"] { flex: 1 1 200px; }
 .edit-form input[name="due"] { width: 130px; }
 
-.expense-table tfoot td {
-  font-weight: 700;
+.expense-table tfoot td, .debt-summary-table tfoot td {
+  font-weight: 800;
+  font-size: 17px;
   border-top: 1px solid var(--text);
   border-bottom: none;
-  padding-top: 16px;
+  padding-top: 20px;
+  padding-bottom: 4px;
 }
+
+#debtSummaryPanel.hidden { display: none; }
 
 /* keep the 3-column layout on tablets/laptops — only stack on genuinely
    narrow (phone-width) screens */

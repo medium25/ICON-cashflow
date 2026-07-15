@@ -781,9 +781,46 @@ function setDateDisplay() {
     new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function renderDebtSummary() {
+  const panel = document.getElementById('debtSummaryPanel');
+  const rows = getRows().filter(r => r.isDebt);
+  const tbody = document.getElementById('debtSummaryBody');
+  const tfoot = document.getElementById('debtSummaryFoot');
+  const month = monthOf(todayStr());
+
+  panel.classList.toggle('hidden', rows.length === 0);
+  if (!rows.length) { tbody.innerHTML = ''; tfoot.innerHTML = ''; return; }
+
+  tbody.innerHTML = rows.map(r => {
+    const monthPaid = paidThisMonthByName(r.name, month);
+    const left = r.due - monthPaid;
+    return `
+      <tr>
+        <td>${escapeHtml(r.name)}</td>
+        <td class="num">${fmt(r.due)}</td>
+        <td class="num">${fmt(monthPaid)}</td>
+        <td class="num"><span class="diff-value ${left === 0 ? 'diff-zero' : (left > 0 ? 'diff-pos' : 'diff-neg')}">${fmt(left)}</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  const due = rows.reduce((s, r) => s + r.due, 0);
+  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, month), 0);
+  const left = due - monthPaid;
+  tfoot.innerHTML = `
+    <tr>
+      <td>Итого</td>
+      <td class="num">${fmt(due)}</td>
+      <td class="num">${fmt(monthPaid)}</td>
+      <td class="num"><span class="diff-value ${left === 0 ? 'diff-zero' : (left > 0 ? 'diff-pos' : 'diff-neg')}">${fmt(left)}</span></td>
+    </tr>
+  `;
+}
+
 function renderAll() {
   renderMethods();
   renderExpenseTable();
+  renderDebtSummary();
   renderKpis();
 }
 
