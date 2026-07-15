@@ -61,7 +61,7 @@ function getBalances() { return load(STORAGE.balances, {}); }
 
 function getBalanceEntry(method, date) {
   const entry = getBalances()[`${method}_${date}`];
-  if (entry) return { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [] };
+  if (entry) return { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [], wasTs: entry.wasTs, incomeTs: entry.incomeTs };
   // no record yet for this day — carry yesterday's Остаток into "Было", everything else starts at 0
   const balances = getBalances();
   const prefix = `${method}_`;
@@ -77,11 +77,13 @@ function saveBalanceEntry(method, date, entry) {
 function setWas(method, date, was) {
   const entry = getBalanceEntry(method, date);
   entry.was = was;
+  entry.wasTs = Date.now();
   saveBalanceEntry(method, date, entry);
 }
 function setIncome(method, date, income) {
   const entry = getBalanceEntry(method, date);
   entry.income = income;
+  entry.incomeTs = Date.now();
   saveBalanceEntry(method, date, entry);
 }
 function addSource(method, date, label, amount) {
@@ -617,11 +619,9 @@ function renderKpis() {
   document.getElementById('kpiLeft').textContent = fmt(totalLeft);
 }
 
-// ---------- history: answers "where did this Отдали number come from, by date" ----------
-// Расходы tab = expense entries (Категории). Доходы tab = extra income sources.
-// Both keep soft-deleted records so a removed transaction still shows, struck through.
-
-let historyTab = 'expense';
+// ---------- history page: full list of every transaction, newest day first,
+// chronological within a day (Было/Поступило in the morning, spending after).
+// Soft-deleted records stay, struck through, instead of disappearing. ----------
 
 function timeLabel(ts) {
   return ts ? new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -630,76 +630,44 @@ function dateLabel(dateStr) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' });
 }
 
-function collectIncomeTransactions() {
+function collectAllTransactions() {
+  const items = [];
   const balances = getBalances();
-  const out = [];
   Object.keys(balances).forEach(key => {
     const sep = key.lastIndexOf('_');
-    const method = key.slice(0, sep);
-    const date = key.slice(sep + 1);
-    (balances[key].sources || []).forEach(s => out.push({ ...s, method, date, name: s.label }));
+    const method = key.slice(0, sep), date = key.slice(sep + 1);
+    const entry = balances[key];
+    if (entry.was) items.push({ kind: 'income', method, date, label: 'Было', amount: entry.was, ts: entry.wasTs });
+    if (entry.income) items.push({ kind: 'income', method, date, label: 'Поступило', amount: entry.income, ts: entry.incomeTs });
+    (entry.sources || []).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts, deleted: s.deleted, deletedAt: s.deletedAt }));
   });
-  return out;
+  getExpenses().forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts, deleted: e.deleted, deletedAt: e.deletedAt }));
+  return items;
 }
 
-function renderHistory() {
-  const body = document.getElementById('historyBody');
-  document.querySelectorAll('.modal-tab').forEach(t => t.classList.toggle('active', t.dataset.historyTab === historyTab));
-
-  const items = historyTab === 'expense' ? getExpenses() : collectIncomeTransactions();
-
-  if (!items.length) {
-    body.innerHTML = `<div class="history-empty">${historyTab === 'expense' ? 'Пока нет расходов' : 'Пока нет дополнительных поступлений'}</div>`;
-    return;
-  }
+function renderHistoryPage() {
+  const container = document.getElementById('historyList');
+  const items = collectAllTransactions();
+  if (!items.length) { container.innerHTML = `<div class="history-empty">Пока нет транзакций</div>`; return; }
 
   const byDate = {};
-  items.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+  items.forEach(it => { (byDate[it.date] = byDate[it.date] || []).push(it); });
   const dates = Object.keys(byDate).sort().reverse();
 
-  body.innerHTML = dates.map(date => {
-    const dayItems = byDate[date].slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    const dayTotal = dayItems.filter(e => !e.deleted).reduce((s, e) => s + e.amount, 0);
-    const cards = dayItems.map(e => `
-      <div class="history-card ${e.deleted ? 'deleted' : ''}">
+  container.innerHTML = dates.map(date => {
+    const dayItems = byDate[date].slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const cards = dayItems.map(it => `
+      <div class="history-card ${it.deleted ? 'deleted' : ''}">
         <div class="history-card-top">
-          <span class="history-method">${escapeHtml(e.method)}</span>
-          <span class="history-name">${escapeHtml(e.name || '—')}</span>
-          <span class="history-amount">${fmt(e.amount)}</span>
+          <span class="history-method">${it.kind === 'income' ? 'Доход' : 'Расход'} ${escapeHtml(it.method)}</span>
+          <span class="history-name">${escapeHtml(it.label || '—')}</span>
+          <span class="history-amount ${it.kind === 'income' ? 'amount-pos' : 'amount-neg'}">${it.kind === 'income' ? '+' : '-'}${fmt(it.amount)}</span>
         </div>
-        <div class="history-meta">
-          ${timeLabel(e.ts)}${e.checked ? ' · оплачено' : ''}${e.deleted ? `<span class="history-deleted-tag">Удалено ${timeLabel(e.deletedAt)}</span>` : ''}
-        </div>
-        <input
-          type="text"
-          class="history-comment"
-          placeholder="Комментарий..."
-          value="${escapeHtml(e.comment || '')}"
-          data-comment-type="${historyTab}"
-          data-comment-id="${e.id}"
-          data-comment-method="${escapeHtml(e.method)}"
-          data-comment-date="${e.date}"
-          ${e.deleted ? 'disabled' : ''}
-        >
+        <div class="history-meta">${timeLabel(it.ts)}${it.deleted ? ` <span class="history-deleted-tag">Удалено ${timeLabel(it.deletedAt)}</span>` : ''}</div>
       </div>
     `).join('');
-    return `
-      <div class="history-day">
-        <div class="history-day-label"><span>${dateLabel(date)}</span><span>${fmt(dayTotal)}</span></div>
-        ${cards}
-      </div>
-    `;
+    return `<div class="history-day"><div class="history-day-label">${dateLabel(date)}</div>${cards}</div>`;
   }).join('');
-
-  body.querySelectorAll('[data-comment-id]').forEach(input => {
-    input.addEventListener('change', () => {
-      if (input.dataset.commentType === 'expense') {
-        setExpenseComment(input.dataset.commentId, input.value.trim());
-      } else {
-        setSourceComment(input.dataset.commentMethod, input.dataset.commentDate, input.dataset.commentId, input.value.trim());
-      }
-    });
-  });
 }
 
 // ---------- utils ----------
@@ -717,34 +685,14 @@ function setupGlobalEvents() {
   const toggleBtn = document.getElementById('toggleAddRow');
   const cancelBtn = document.getElementById('cancelAddRow');
 
-  const historyOverlay = document.getElementById('historyOverlay');
-  document.getElementById('historyBtn').addEventListener('click', () => {
-    renderHistory();
-    historyOverlay.classList.remove('hidden');
-  });
-  document.getElementById('closeHistory').addEventListener('click', () => {
-    historyOverlay.classList.add('hidden');
-  });
-  historyOverlay.addEventListener('click', (e) => {
-    if (e.target === historyOverlay) historyOverlay.classList.add('hidden');
-  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      historyOverlay.classList.add('hidden');
-      if (openRowMenuId) { openRowMenuId = null; renderAll(); }
-    }
+    if (e.key === 'Escape' && openRowMenuId) { openRowMenuId = null; renderAll(); }
   });
   document.addEventListener('click', (e) => {
     if (openRowMenuId && !e.target.closest('.row-menu') && !e.target.closest('[data-row-menu-toggle]')) {
       openRowMenuId = null;
       renderAll();
     }
-  });
-  document.querySelectorAll('[data-history-tab]').forEach(tab => {
-    tab.addEventListener('click', () => {
-      historyTab = tab.dataset.historyTab;
-      renderHistory();
-    });
   });
 
   toggleBtn.addEventListener('click', () => {
@@ -889,8 +837,11 @@ function initTheme() {
   });
 }
 
-setDateDisplay();
-setupGlobalEvents();
-seedIfEmpty();
-renderAll();
-initTheme();
+if (document.getElementById('methodsRow')) {
+  setDateDisplay();
+  setupGlobalEvents();
+  seedIfEmpty();
+  renderAll();
+}
+if (document.getElementById('historyList')) renderHistoryPage();
+if (document.getElementById('themeToggle')) initTheme();

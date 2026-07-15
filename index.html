@@ -14,24 +14,9 @@
     <h1>ICON FINANCE</h1>
     <div class="topbar-right">
       <div class="date-display" id="todayDate"></div>
-      <button id="historyBtn" class="btn btn-secondary">История</button>
+      <a href="history.html" class="btn btn-secondary">История</a>
     </div>
   </header>
-
-  <div id="historyOverlay" class="modal-overlay hidden">
-    <div class="modal modal-lg">
-      <div class="modal-head">
-        <h2>История транзакций</h2>
-        <button id="closeHistory" class="btn-icon" title="Закрыть">✕</button>
-      </div>
-      <p class="modal-hint">Каждая транзакция — источник, время и дата ввода. Удалённые показаны зачёркнутыми.</p>
-      <div class="modal-tabs">
-        <button class="modal-tab active" data-history-tab="expense">Расходы</button>
-        <button class="modal-tab" data-history-tab="income">Доходы</button>
-      </div>
-      <div id="historyBody" class="modal-body"></div>
-    </div>
-  </div>
 
   <div class="kpi-row">
     <div class="kpi-card">
