@@ -256,7 +256,7 @@ function renderMethods() {
     const rowsHtml = entries.length
       ? entries.map((e, i) => `
           <div class="cat-row ${e.checked ? 'checked' : ''}">
-            <button type="button" class="cat-index" data-check-expense="${e.id}" title="Отметить оплату">${i + 1}</button>
+            <button type="button" class="cat-index" data-check-expense="${e.id}" title="Отметить оплату">${e.checked ? '✓' : i + 1}</button>
             <span class="cat-name">${escapeHtml(e.name || '—')}</span>
             <span class="cat-amount">${fmt(e.amount)}</span>
             <button class="cat-del" data-del-expense="${e.id}" title="Удалить">✕</button>

@@ -17,6 +17,8 @@
   --accent: #0071e3;
   --accent-press: #0059b3;
   --orange: #ff9f0a;
+  --expense-bg: #fdecea;
+  --expense-bg-hover: #fbdedb;
   --radius-lg: 20px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -293,10 +295,10 @@ body {
   font-size: 15px;
   border-bottom: 1px solid var(--border);
   transition: background 0.12s ease;
-  background: #2a1618;
-  box-shadow: inset 3px 0 0 #c0392b;
+  background: var(--expense-bg);
+  box-shadow: inset 3px 0 0 #c0392b, 0 0 14px rgba(192, 57, 43, 0.3);
 }
-.cat-row:hover { background: #341a1c; }
+.cat-row:hover { background: var(--expense-bg-hover); }
 .cat-index {
   grid-column: 1;
   justify-self: center;
@@ -766,6 +768,8 @@ body {
   --text-muted: #98989d;
   --head-bg: #ffffff;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
+  --expense-bg: #3d1c1e;
+  --expense-bg-hover: #4a2224;
 }
 
 .theme-toggle {
