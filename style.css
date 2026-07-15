@@ -293,8 +293,10 @@ body {
   font-size: 15px;
   border-bottom: 1px solid var(--border);
   transition: background 0.12s ease;
+  background: #2a1618;
+  box-shadow: inset 3px 0 0 #c0392b;
 }
-.cat-row:hover { background: var(--surface-tint); }
+.cat-row:hover { background: #341a1c; }
 .cat-index {
   grid-column: 1;
   justify-self: center;
@@ -316,16 +318,8 @@ body {
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .cat-index:hover { border-color: var(--accent); color: var(--accent); }
-.cat-row .cat-name { color: var(--text); font-weight: 500; transition: color 0.12s ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.cat-row .cat-amount { color: var(--orange); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.12s ease; }
-.cat-row.checked {
-  background: var(--red-soft);
-  box-shadow: inset 3px 0 0 var(--red);
-}
-.cat-row.checked:hover { background: var(--red-soft); }
-.cat-row.checked .cat-index { background: var(--red-deep); border-color: var(--red-deep); color: white; box-shadow: 0 0 7px rgba(255, 255, 255, 0.45); }
-.cat-row.checked .cat-name { color: var(--red); font-weight: 600; }
-.cat-row.checked .cat-amount { color: var(--red); font-weight: 650; }
+.cat-row .cat-name { color: #c0392b; font-weight: 600; transition: color 0.12s ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cat-row .cat-amount { color: #c0392b; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.12s ease; }
 .cat-row .cat-del {
   justify-self: center;
   border: none;
