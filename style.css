@@ -576,7 +576,9 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 26px 28px;
+  margin-bottom: 24px;
 }
+.panel:last-child { margin-bottom: 0; }
 .panel-head {
   display: flex;
   align-items: center;
