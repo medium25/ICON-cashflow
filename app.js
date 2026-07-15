@@ -9,6 +9,15 @@
    - Everything else (Сумма, Остаток, KPIs, Отдали Сегодня/в этом месяце, Разница)
      is calculated automatically. No localStorage seed data. */
 
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+db.settings({ experimentalAutoDetectLongPolling: true });
+
+// state.isAdmin gates every mutating listener/render affordance — only the
+// admin can write; everyone else gets the same shared data read-only.
+let state = { isAdmin: false, currentUser: null };
+
 const STORAGE = {
   rows: 'cf_rows',           // {id, name, due}
   expenses: 'cf_expenses',   // {id, method, name, amount, checked, date, ts, comment, deleted, deletedAt}
@@ -51,13 +60,28 @@ function load(key, fallback) {
   const raw = localStorage.getItem(key);
   return raw ? JSON.parse(raw) : fallback;
 }
+
+// Shared data now lives in Firestore (collection "cashflow", one doc per
+// dataset) so every registered user sees the same live numbers instead of
+// their own empty per-browser localStorage. CACHE mirrors the 3 datasets in
+// memory, kept in sync by onSnapshot listeners (see attachSnapshotListeners),
+// so every existing getRows()/getExpenses()/getBalances() call site and every
+// derived-computation helper below keeps working completely unchanged.
+const CACHE = { rows: [], expenses: [], balances: {} };
+const STORAGE_TO_CACHE_KEY = { [STORAGE.rows]: 'rows', [STORAGE.expenses]: 'expenses', [STORAGE.balances]: 'balances' };
+
 function save(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  const cacheKey = STORAGE_TO_CACHE_KEY[key];
+  CACHE[cacheKey] = value; // optimistic — renderAll() called right after a mutation sees the change immediately
+  db.collection('cashflow').doc(cacheKey).set({ data: value }).catch((err) => {
+    console.error('Save failed', err);
+    alert('Не удалось сохранить: проверьте соединение.');
+  });
 }
 
-function getRows() { return load(STORAGE.rows, []); }
-function getExpenses() { return load(STORAGE.expenses, []); }
-function getBalances() { return load(STORAGE.balances, {}); }
+function getRows() { return CACHE.rows; }
+function getExpenses() { return CACHE.expenses; }
+function getBalances() { return CACHE.balances; }
 
 function getBalanceEntry(method, date) {
   const entry = getBalances()[`${method}_${date}`];
@@ -258,10 +282,12 @@ function renderMethods() {
     const rowsHtml = entries.length
       ? entries.map((e, i) => `
           <div class="cat-row ${e.checked ? 'checked' : ''}">
-            <button type="button" class="cat-index" data-check-expense="${e.id}" title="Отметить оплату">${e.checked ? '✓' : i + 1}</button>
+            ${state.isAdmin
+              ? `<button type="button" class="cat-index" data-check-expense="${e.id}" title="Отметить оплату">${e.checked ? '✓' : i + 1}</button>`
+              : `<span class="cat-index">${e.checked ? '✓' : i + 1}</span>`}
             <span class="cat-name">${escapeHtml(e.name || '—')}</span>
             <span class="cat-amount">${fmt(e.amount)}</span>
-            <button class="cat-del" data-del-expense="${e.id}" title="Удалить">✕</button>
+            ${state.isAdmin ? `<button class="cat-del" data-del-expense="${e.id}" title="Удалить">✕</button>` : ''}
           </div>
         `).join('')
       : `<div class="empty-hint">Пока нет записей</div>`;
@@ -270,7 +296,7 @@ function renderMethods() {
       <div class="balance-row source-row">
         <span class="balance-label">${escapeHtml(s.label)}</span>
         <span class="source-amount">${fmt(s.amount)}</span>
-        <button class="source-del" data-del-source="${s.id}" data-method="${method}" title="Удалить">✕</button>
+        ${state.isAdmin ? `<button class="source-del" data-del-source="${s.id}" data-method="${method}" title="Удалить">✕</button>` : ''}
       </div>
     `).join('');
 
@@ -281,28 +307,34 @@ function renderMethods() {
           <div class="balance-rows">
             <div class="balance-row">
               <span class="balance-label">Было</span>
-              <input type="text" inputmode="numeric" class="balance-input" data-balance-was="${method}" data-amount value="${bal.was ? fmt(bal.was) : ''}" placeholder="0">
+              ${state.isAdmin
+                ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-was="${method}" data-amount value="${bal.was ? fmt(bal.was) : ''}" placeholder="0">`
+                : `<span class="balance-input-static">${fmt(bal.was)}</span>`}
             </div>
             <div class="balance-row">
               <span class="balance-label">Поступило</span>
-              <input type="text" inputmode="numeric" class="balance-input" data-balance-income="${method}" data-amount value="${bal.income ? fmt(bal.income) : ''}" placeholder="0">
+              ${state.isAdmin
+                ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-income="${method}" data-amount value="${bal.income ? fmt(bal.income) : ''}" placeholder="0">`
+                : `<span class="balance-input-static">${fmt(bal.income)}</span>`}
             </div>
+            ${state.isAdmin ? `
             <form class="source-add-row ${sourceFormOpen ? '' : 'hidden'}" data-source-form="${method}">
               <input type="text" placeholder="Название источника" data-source-label required>
               <input type="text" inputmode="numeric" placeholder="Сумма" data-source-amount data-amount required>
               <button type="submit" class="btn btn-primary">Добавить</button>
-            </form>
+            </form>` : ''}
             ${sourcesHtml}
           </div>
           <div class="balance-row sum">
             <span>Сумма</span>
             <span>${fmt(total)}</span>
-            <button type="button" class="btn-kebab" data-toggle-source="${method}" title="Добавить источник">⋯</button>
+            ${state.isAdmin ? `<button type="button" class="btn-kebab" data-toggle-source="${method}" title="Добавить источник">⋯</button>` : ''}
           </div>
         </div>
         <div class="method-col stripe-red">
           <div class="col-head">Расходы ${METHOD_PHRASE[method]}</div>
           <div class="cat-list">${rowsHtml}</div>
+          ${state.isAdmin ? `
           <form class="cat-add-row" data-expense-form="${method}">
             <div class="autocomplete" data-autocomplete>
               <input type="text" placeholder="Категория" data-expense-name autocomplete="off">
@@ -310,7 +342,7 @@ function renderMethods() {
             </div>
             <input type="text" inputmode="numeric" placeholder="Сумма" data-expense-amount data-amount required>
             <button type="submit">+</button>
-          </form>
+          </form>` : ''}
           <div class="cat-sum-row"><span></span><span>Сумма</span><span>${fmt(catSum)}</span></div>
         </div>
         <div class="method-col stripe-blue">
@@ -411,7 +443,7 @@ function renderRow(r) {
   const diff = r.due - monthPaid;
   const diffClass = diff === 0 ? 'diff-zero' : (diff > 0 ? 'diff-pos' : 'diff-neg');
 
-  if (editingRowId === r.id) {
+  if (state.isAdmin && editingRowId === r.id) {
     return `
       <tr class="editing">
         <td colspan="8">
@@ -430,14 +462,14 @@ function renderRow(r) {
   const menuOpen = openRowMenuId === r.id;
   return `
     <tr data-row-id="${r.id}">
-      <td class="drag-col"><span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span></td>
+      <td class="drag-col">${state.isAdmin ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
       <td class="date-cell">${escapeHtml(r.payDate || '—')}</td>
       <td>${r.isDebt ? `<span class="debt-dot" title="Долг"></span>` : ''}${escapeHtml(r.name)}${r.comment ? `<span class="info-icon" data-view-comment="${r.id}" title="${escapeHtml(r.comment)}">i</span>` : ''}</td>
       <td class="num due-cell">${fmt(r.due)}</td>
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
-      <td class="actions-cell">
+      <td class="actions-cell">${state.isAdmin ? `
         <button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>
         <div class="row-menu ${menuOpen ? '' : 'hidden'}" data-row-menu="${r.id}">
           <button data-edit-row="${r.id}">✎ Редактировать</button>
@@ -445,7 +477,7 @@ function renderRow(r) {
           <button data-comment-row="${r.id}">💬 Комментарий</button>
           <button data-fix-month="${r.id}">🔧 Исправить «Отдали в этом месяце»</button>
           <button data-del-row="${r.id}" class="danger">✕ Удалить</button>
-        </div>
+        </div>` : ''}
       </td>
     </tr>
   `;
@@ -707,6 +739,8 @@ function escapeHtml(str) {
 // ---------- events ----------
 
 function setupGlobalEvents() {
+  if (!state.isAdmin) return; // admin-only elements are removed from the DOM for everyone else
+
   const newRowForm = document.getElementById('newRowForm');
   const toggleBtn = document.getElementById('toggleAddRow');
   const cancelBtn = document.getElementById('cancelAddRow');
@@ -888,11 +922,140 @@ function initTheme() {
   });
 }
 
-if (document.getElementById('methodsRow')) {
-  setDateDisplay();
-  setupGlobalEvents();
-  seedIfEmpty();
-  renderAll();
+// ---------- auth ----------
+
+let authMode = 'login'; // 'login' | 'register'
+let authError = '';
+
+function mapAuthError(err) {
+  switch (err && err.code) {
+    case 'auth/email-already-in-use': return 'Этот email уже зарегистрирован. Войдите.';
+    case 'auth/invalid-email': return 'Введите корректную почту.';
+    case 'auth/weak-password': return 'Пароль должен быть не короче 6 символов.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Неверная почта или пароль.';
+    default: return 'Что-то пошло не так. Попробуйте ещё раз.';
+  }
 }
-if (document.getElementById('historyList')) renderHistoryPage();
+
+function renderAuthForm() {
+  const gate = document.getElementById('authGate');
+  const isLogin = authMode === 'login';
+  gate.innerHTML = `
+    <div class="panel auth-wrap">
+      <div class="auth-title">${isLogin ? 'Вход' : 'Регистрация'}</div>
+      <form id="authForm">
+        <input class="auth-input" type="email" id="authEmail" placeholder="Электронная почта" required>
+        <input class="auth-input" type="password" id="authPassword" placeholder="Пароль" required>
+        ${isLogin ? '' : '<input class="auth-input" type="password" id="authPassword2" placeholder="Повторите пароль" required>'}
+        ${authError ? `<div class="auth-error">${escapeHtml(authError)}</div>` : ''}
+        <button type="submit" class="btn btn-primary" style="width:100%;">${isLogin ? 'Войти' : 'Создать аккаунт'}</button>
+      </form>
+      <div class="auth-toggle">${isLogin
+        ? 'Нет аккаунта? <a id="authToggle">Зарегистрироваться</a>'
+        : 'Уже есть аккаунт? <a id="authToggle">Войти</a>'}</div>
+    </div>
+  `;
+  gate.querySelector('#authToggle').addEventListener('click', () => {
+    authMode = isLogin ? 'register' : 'login';
+    authError = '';
+    renderAuthForm();
+  });
+  gate.querySelector('#authForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = gate.querySelector('#authEmail').value.trim();
+    const password = gate.querySelector('#authPassword').value;
+    if (isLogin) {
+      auth.signInWithEmailAndPassword(email, password).catch((err) => {
+        authError = mapAuthError(err);
+        renderAuthForm();
+      });
+    } else {
+      const password2 = gate.querySelector('#authPassword2').value;
+      if (password !== password2) { authError = 'Пароли не совпадают.'; renderAuthForm(); return; }
+      auth.createUserWithEmailAndPassword(email, password).catch((err) => {
+        authError = mapAuthError(err);
+        renderAuthForm();
+      });
+    }
+  });
+}
+
+function showAuthGate() {
+  document.getElementById('authGate').classList.remove('hidden');
+  const app = document.getElementById('app');
+  if (app) app.classList.add('hidden');
+  renderAuthForm();
+}
+
+function renderCurrentPage() {
+  if (document.getElementById('methodsRow')) renderAll();
+  if (document.getElementById('historyList')) renderHistoryPage();
+}
+
+function onSnapshotError(err) {
+  console.error('Snapshot listener failed', err);
+  alert('Не удалось загрузить данные: проверьте соединение.');
+}
+function attachSnapshotListeners() {
+  db.collection('cashflow').doc('rows').onSnapshot((doc) => {
+    CACHE.rows = (doc.data() && doc.data().data) || [];
+    renderCurrentPage();
+  }, onSnapshotError);
+  db.collection('cashflow').doc('expenses').onSnapshot((doc) => {
+    CACHE.expenses = (doc.data() && doc.data().data) || [];
+    renderCurrentPage();
+  }, onSnapshotError);
+  db.collection('cashflow').doc('balances').onSnapshot((doc) => {
+    CACHE.balances = (doc.data() && doc.data().data) || {};
+    renderCurrentPage();
+  }, onSnapshotError);
+}
+
+// One-time migration: the admin's real, currently-accumulated data lives in
+// this browser's localStorage. On the admin's first login after this
+// shipped, seed the shared Firestore docs from it — but only if nobody has
+// seeded them yet, so this never runs again (and never overwrites live data).
+function migrateLocalDataIfNeeded() {
+  return db.collection('cashflow').doc('rows').get().then((rowsDoc) => {
+    if (rowsDoc.exists) return;
+    const batch = db.batch();
+    batch.set(db.collection('cashflow').doc('rows'), { data: load(STORAGE.rows, []) });
+    batch.set(db.collection('cashflow').doc('expenses'), { data: load(STORAGE.expenses, []) });
+    batch.set(db.collection('cashflow').doc('balances'), { data: load(STORAGE.balances, {}) });
+    return batch.commit();
+  });
+}
+
+function enterApp(authUid, isAdmin) {
+  state.currentUser = authUid;
+  state.isAdmin = isAdmin;
+  if (!isAdmin) document.querySelectorAll('.admin-only').forEach((el) => el.remove());
+
+  (isAdmin ? migrateLocalDataIfNeeded() : Promise.resolve()).catch((err) => {
+    console.error('Migration failed', err);
+  }).then(() => {
+    attachSnapshotListeners();
+    document.getElementById('authGate').classList.add('hidden');
+    const app = document.getElementById('app');
+    if (app) app.classList.remove('hidden');
+    if (document.getElementById('methodsRow')) { setDateDisplay(); setupGlobalEvents(); }
+  });
+}
+
+document.getElementById('authGate').innerHTML = '<div class="auth-wrap empty-hint" style="text-align:center;">Загрузка…</div>';
+document.getElementById('authGate').classList.remove('hidden');
+
+auth.onAuthStateChanged((user) => {
+  if (state.currentUser) return; // already entered via enterApp() above
+  if (!user) { showAuthGate(); return; }
+  db.collection('admins').doc(user.uid).get()
+    .then((adminDoc) => enterApp(user.uid, adminDoc.exists))
+    .catch(() => {
+      authError = 'Не удалось загрузить данные. Проверьте соединение.';
+      showAuthGate();
+    });
+});
+
 if (document.getElementById('themeToggle')) initTheme();

@@ -8,7 +8,9 @@
 </head>
 <body>
 
-<div class="app">
+<div id="authGate" class="hidden"></div>
+
+<div class="app hidden" id="app">
 
   <header class="topbar">
     <h1>ICON FINANCE</h1>
@@ -41,12 +43,12 @@
     <div class="panel-head">
       <h2>Наименования</h2>
       <div class="panel-head-actions">
-        <button id="newMonthBtn" class="btn btn-secondary">Перейти к новому месяцу</button>
-        <button id="toggleAddRow" class="btn btn-secondary">+ Добавить</button>
+        <button id="newMonthBtn" class="btn btn-secondary admin-only">Перейти к новому месяцу</button>
+        <button id="toggleAddRow" class="btn btn-secondary admin-only">+ Добавить</button>
       </div>
     </div>
 
-    <form id="newRowForm" class="inline-form hidden">
+    <form id="newRowForm" class="inline-form hidden admin-only">
       <input type="text" id="newRowPayDate" placeholder="Дата (любая, 5 число...)">
       <input type="text" id="newRowName" placeholder="Название" required>
       <input type="text" inputmode="numeric" id="newRowDue" placeholder="Должны" data-amount required>
@@ -94,6 +96,10 @@
 
 <button id="themeToggle" class="theme-toggle" title="Тема">🌙</button>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
