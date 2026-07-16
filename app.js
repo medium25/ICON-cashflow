@@ -70,8 +70,58 @@ function load(key, fallback) {
 const CACHE = { rows: [], expenses: [], balances: {} };
 const STORAGE_TO_CACHE_KEY = { [STORAGE.rows]: 'rows', [STORAGE.expenses]: 'expenses', [STORAGE.balances]: 'balances' };
 
+// Guards against the failure mode where a mutation fires before the initial
+// onSnapshot data has arrived: CACHE would still be empty, and since save()
+// does a full .set() (not a merge), that would wipe the entire shared
+// document down to just the one new item. snapshotsLoaded is flipped true
+// per-doc the first time attachSnapshotListeners() hears back from Firestore;
+// enterApp() also waits on it before wiring up any mutating UI, so this is
+// a backstop for anything that could still slip through.
+const snapshotsLoaded = { rows: false, expenses: false, balances: false };
+function allDataLoaded() {
+  return snapshotsLoaded.rows && snapshotsLoaded.expenses && snapshotsLoaded.balances;
+}
+
+function countOf(value) {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === 'object') return Object.keys(value).length;
+  return 0;
+}
+
+// A save that drops more than half the records (and more than a handful
+// outright) is very unlikely to be one intentional action — single
+// deletes only ever remove one item at a time. Catches any future bug of
+// this shape, not just the specific race this file already guards against.
+function isSuspiciousShrink(previousValue, nextValue) {
+  const before = countOf(previousValue), after = countOf(nextValue);
+  return before >= 5 && after < before - 3 && after < before * 0.5;
+}
+
+// Best-effort "one step back" safety net: stash whatever was live just
+// before an overwrite into a separate doc. Fire-and-forget — never blocks
+// or delays the real save, so a backup failure can't break normal use.
+function backupPreviousValue(cacheKey, previousValue) {
+  db.collection('cashflow_backups').doc(cacheKey)
+    .set({ data: previousValue, ts: Date.now() })
+    .catch((err) => console.error('Backup failed', err));
+}
+
 function save(key, value) {
   const cacheKey = STORAGE_TO_CACHE_KEY[key];
+  if (!allDataLoaded()) {
+    console.error('Blocked save() before initial data finished loading — would have overwritten real data with a partial CACHE', cacheKey, value);
+    alert('Данные ещё загружаются. Подождите пару секунд и повторите.');
+    return;
+  }
+  const previous = CACHE[cacheKey];
+  if (isSuspiciousShrink(previous, value)) {
+    const before = countOf(previous), after = countOf(value);
+    if (!confirm(`Это действие уменьшит «${cacheKey}» с ${before} до ${after} записей — заметно больше, чем обычно удаляется за раз. Точно продолжить?`)) {
+      renderAll();
+      return;
+    }
+  }
+  backupPreviousValue(cacheKey, previous);
   CACHE[cacheKey] = value; // optimistic — renderAll() called right after a mutation sees the change immediately
   db.collection('cashflow').doc(cacheKey).set({ data: value }).catch((err) => {
     console.error('Save failed', err);
@@ -275,9 +325,26 @@ let openRowMenuId = null; // debt-row whose ⋯ actions menu is open
 
 // ---------- category name autocomplete popup ----------
 
+// Lives as a single element directly under <body>, never inside a
+// .method-col — those cards have backdrop-filter, which (like transform)
+// makes them the containing block for any position:fixed descendant. A menu
+// nested inside one would get positioned relative to the card instead of the
+// viewport, while the math below assumes viewport coordinates — that
+// mismatch is what sent the dropdown flying off to an unrelated card.
+let autocompleteMenuEl = null;
+let autocompleteTargetInput = null;
+function ensureAutocompleteMenu() {
+  if (!autocompleteMenuEl) {
+    autocompleteMenuEl = document.createElement('div');
+    autocompleteMenuEl.className = 'autocomplete-menu hidden';
+    document.body.appendChild(autocompleteMenuEl);
+  }
+  return autocompleteMenuEl;
+}
+
 function openAutocompleteFor(input) {
-  const wrap = input.closest('[data-autocomplete]');
-  const menu = wrap.querySelector('[data-autocomplete-menu]');
+  const menu = ensureAutocompleteMenu();
+  autocompleteTargetInput = input;
   const names = [...new Set(getRows().map(r => r.name).filter(Boolean))];
   const f = input.value.trim().toLowerCase();
   const filtered = f ? names.filter(n => n.toLowerCase().startsWith(f)) : names;
@@ -302,7 +369,8 @@ function openAutocompleteFor(input) {
   }
 }
 function closeAllAutocomplete() {
-  document.querySelectorAll('.autocomplete-menu').forEach(m => m.classList.add('hidden'));
+  if (autocompleteMenuEl) autocompleteMenuEl.classList.add('hidden');
+  autocompleteTargetInput = null;
 }
 
 // ---------- rendering: method blocks ----------
@@ -378,7 +446,6 @@ function renderMethods() {
           <form class="cat-add-row" data-expense-form="${method}">
             <div class="autocomplete" data-autocomplete>
               <input type="text" placeholder="Категория" data-expense-name autocomplete="off">
-              <div class="autocomplete-menu hidden" data-autocomplete-menu></div>
             </div>
             <input type="text" inputmode="numeric" placeholder="Сумма" data-expense-amount data-amount required>
             <button type="submit">+</button>
@@ -831,16 +898,15 @@ function setupGlobalEvents() {
   methodsRow.addEventListener('keydown', (e) => {
     if (e.target.matches('[data-expense-name]') && e.key === 'Escape') closeAllAutocomplete();
   });
-  methodsRow.addEventListener('mousedown', (e) => {
+  document.addEventListener('mousedown', (e) => {
     const item = e.target.closest('.autocomplete-item');
-    if (!item) return;
+    if (!item || !autocompleteTargetInput) return;
     e.preventDefault();
-    const wrap = item.closest('[data-autocomplete]');
-    wrap.querySelector('[data-expense-name]').value = item.dataset.value;
+    autocompleteTargetInput.value = item.dataset.value;
     closeAllAutocomplete();
   });
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('[data-autocomplete]')) closeAllAutocomplete();
+    if (!e.target.closest('[data-autocomplete]') && !e.target.closest('.autocomplete-menu')) closeAllAutocomplete();
   });
 
   // live space-grouping for every amount field on the page, delegated so it
@@ -1039,19 +1105,31 @@ function onSnapshotError(err) {
   console.error('Snapshot listener failed', err);
   alert('Не удалось загрузить данные: проверьте соединение.');
 }
+// Resolves only once all three docs have delivered their first snapshot, so
+// callers can hold off wiring up any mutating UI until CACHE actually
+// reflects the real shared data instead of its empty initial state.
 function attachSnapshotListeners() {
-  db.collection('cashflow').doc('rows').onSnapshot((doc) => {
-    CACHE.rows = (doc.data() && doc.data().data) || [];
-    renderCurrentPage();
-  }, onSnapshotError);
-  db.collection('cashflow').doc('expenses').onSnapshot((doc) => {
-    CACHE.expenses = (doc.data() && doc.data().data) || [];
-    renderCurrentPage();
-  }, onSnapshotError);
-  db.collection('cashflow').doc('balances').onSnapshot((doc) => {
-    CACHE.balances = (doc.data() && doc.data().data) || {};
-    renderCurrentPage();
-  }, onSnapshotError);
+  return new Promise((resolve) => {
+    const markLoaded = (key) => {
+      snapshotsLoaded[key] = true;
+      if (allDataLoaded()) resolve();
+    };
+    db.collection('cashflow').doc('rows').onSnapshot((doc) => {
+      CACHE.rows = (doc.data() && doc.data().data) || [];
+      markLoaded('rows');
+      renderCurrentPage();
+    }, onSnapshotError);
+    db.collection('cashflow').doc('expenses').onSnapshot((doc) => {
+      CACHE.expenses = (doc.data() && doc.data().data) || [];
+      markLoaded('expenses');
+      renderCurrentPage();
+    }, onSnapshotError);
+    db.collection('cashflow').doc('balances').onSnapshot((doc) => {
+      CACHE.balances = (doc.data() && doc.data().data) || {};
+      markLoaded('balances');
+      renderCurrentPage();
+    }, onSnapshotError);
+  });
 }
 
 // One-time migration: the admin's real, currently-accumulated data lives in
@@ -1076,8 +1154,9 @@ function enterApp(authUid, isAdmin) {
 
   (isAdmin ? migrateLocalDataIfNeeded() : Promise.resolve()).catch((err) => {
     console.error('Migration failed', err);
-  }).then(() => {
-    attachSnapshotListeners();
+  }).then(() => attachSnapshotListeners()).then(() => {
+    // only now does CACHE hold the real shared data — safe to reveal the
+    // app and let the admin start mutating it
     document.getElementById('authGate').classList.add('hidden');
     const app = document.getElementById('app');
     if (app) app.classList.remove('hidden');
