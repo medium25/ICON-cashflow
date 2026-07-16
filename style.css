@@ -381,9 +381,10 @@ body::before {
   height: 22px;
   border-radius: 50%;
   border: 1px solid var(--glass-border);
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  /* no backdrop-filter here — this repeats once per expense entry, and
+     blurring dozens of small independent layers is what made the page
+     unresponsive with real data. A flat tinted circle reads the same. */
+  background: var(--glass-surface-strong);
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 650;
@@ -783,9 +784,10 @@ body::before {
 .actions-cell { text-align: right; white-space: nowrap; }
 .btn-icon {
   border: 1px solid var(--glass-border);
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  /* no backdrop-filter — this repeats once per debt row (the ⋯ menu toggle),
+     and blurring dozens of independent small layers is what made the page
+     unresponsive with real data (dozens of rows). Flat tint reads the same. */
+  background: var(--glass-surface-strong);
   color: var(--text-muted);
   border-radius: var(--radius-sm);
   width: 28px;
