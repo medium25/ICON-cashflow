@@ -566,7 +566,6 @@ function renderRow(r) {
     `;
   }
 
-  const menuOpen = openRowMenuId === r.id;
   return `
     <tr data-row-id="${r.id}">
       <td class="drag-col">${state.isAdmin ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
@@ -576,18 +575,78 @@ function renderRow(r) {
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
-      <td class="actions-cell">${state.isAdmin ? `
-        <button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>
-        <div class="row-menu ${menuOpen ? '' : 'hidden'}" data-row-menu="${r.id}">
-          <button data-edit-row="${r.id}">✎ Редактировать</button>
-          <button data-mark-debt="${r.id}">${r.isDebt ? '● Убрать пометку долга' : '● Пометить как долг'}</button>
-          <button data-comment-row="${r.id}">💬 Комментарий</button>
-          <button data-fix-month="${r.id}">🔧 Исправить «Отдали в этом месяце»</button>
-          <button data-del-row="${r.id}" class="danger">✕ Удалить</button>
-        </div>` : ''}
-      </td>
+      <td class="actions-cell">${state.isAdmin ? `<button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>` : ''}</td>
     </tr>
   `;
+}
+
+// Lives as a single element directly under <body>, for the same reason as
+// the autocomplete menu above: .panel (which wraps the debt table) has
+// backdrop-filter, so a position:fixed element nested inside it gets
+// positioned relative to the panel instead of the viewport — which is what
+// sent this menu somewhere else on screen instead of next to the ⋯ button.
+let rowMenuEl = null;
+function ensureRowMenuEl() {
+  if (!rowMenuEl) {
+    rowMenuEl = document.createElement('div');
+    rowMenuEl.className = 'row-menu hidden';
+    document.body.appendChild(rowMenuEl);
+  }
+  return rowMenuEl;
+}
+
+function renderRowMenu() {
+  const menu = ensureRowMenuEl();
+  if (!openRowMenuId) { menu.classList.add('hidden'); return; }
+  const row = getRows().find(r => r.id === openRowMenuId);
+  const toggleBtn = document.querySelector(`[data-row-menu-toggle="${openRowMenuId}"]`);
+  if (!row || !toggleBtn) { openRowMenuId = null; menu.classList.add('hidden'); return; }
+
+  menu.innerHTML = `
+    <button data-edit-row>✎ Редактировать</button>
+    <button data-mark-debt>${row.isDebt ? '● Убрать пометку долга' : '● Пометить как долг'}</button>
+    <button data-comment-row>💬 Комментарий</button>
+    <button data-fix-month>🔧 Исправить «Отдали в этом месяце»</button>
+    <button data-del-row class="danger">✕ Удалить</button>
+  `;
+  menu.classList.remove('hidden');
+
+  const rect = toggleBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${window.innerWidth - rect.right}px`;
+
+  menu.querySelector('[data-edit-row]').addEventListener('click', () => {
+    editingRowId = row.id; openRowMenuId = null; renderAll();
+  });
+  menu.querySelector('[data-mark-debt]').addEventListener('click', () => {
+    toggleRowDebt(row.id); openRowMenuId = null; renderAll();
+  });
+  menu.querySelector('[data-comment-row]').addEventListener('click', () => {
+    const next = prompt('Комментарий:', row.comment || '');
+    openRowMenuId = null;
+    if (next === null) { renderAll(); return; }
+    setRowComment(row.id, next.trim());
+    renderAll();
+  });
+  menu.querySelector('[data-fix-month]').addEventListener('click', () => {
+    openRowMenuId = null;
+    const m = monthOf(todayStr());
+    const current = paidThisMonthByName(row.name, m);
+    const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
+    if (raw === null) { renderAll(); return; }
+    const next = Number(String(raw).replace(/\D/g, ''));
+    const code = prompt('Код подтверждения:');
+    if (code !== '1223') { alert('Неверный код'); renderAll(); return; }
+    const delta = next - current;
+    if (delta !== 0) addExpense('Корректировка', row.name, delta);
+    renderAll();
+  });
+  menu.querySelector('[data-del-row]').addEventListener('click', () => {
+    openRowMenuId = null;
+    if (!confirm(`Удалить «${row.name}»?`)) { renderAll(); return; }
+    deleteRow(row.id);
+    renderAll();
+  });
 }
 
 function renderExpenseTable() {
@@ -618,18 +677,6 @@ function renderExpenseTable() {
     </tr>
   ` : '';
 
-  tbody.querySelectorAll('[data-edit-row]').forEach(btn => {
-    btn.addEventListener('click', () => { editingRowId = btn.dataset.editRow; openRowMenuId = null; renderAll(); });
-  });
-  tbody.querySelectorAll('[data-del-row]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const row = rows.find(r => r.id === btn.dataset.delRow);
-      openRowMenuId = null;
-      if (!row || !confirm(`Удалить «${row.name}»?`)) return;
-      deleteRow(btn.dataset.delRow);
-      renderAll();
-    });
-  });
   tbody.querySelectorAll('[data-cancel-edit]').forEach(btn => {
     btn.addEventListener('click', () => { editingRowId = null; renderAll(); });
   });
@@ -661,45 +708,12 @@ function renderExpenseTable() {
       if (row) alert(row.comment);
     });
   });
-  tbody.querySelectorAll('[data-mark-debt]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      toggleRowDebt(btn.dataset.markDebt);
-      openRowMenuId = null;
-      renderAll();
-    });
-  });
-  tbody.querySelectorAll('[data-fix-month]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      openRowMenuId = null;
-      const row = rows.find(r => r.id === btn.dataset.fixMonth);
-      const m = monthOf(todayStr());
-      const current = paidThisMonthByName(row.name, m);
-      const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
-      if (raw === null) { renderAll(); return; }
-      const next = Number(String(raw).replace(/\D/g, ''));
-      const code = prompt('Код подтверждения:');
-      if (code !== '1223') { alert('Неверный код'); renderAll(); return; }
-      const delta = next - current;
-      if (delta !== 0) addExpense('Корректировка', row.name, delta);
-      renderAll();
-    });
-  });
   tbody.querySelectorAll('[data-row-menu-toggle]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.dataset.rowMenuToggle;
-      const opening = openRowMenuId !== id;
-      // capture the button's position BEFORE renderAll() replaces the DOM —
-      // afterwards this button no longer exists, so its rect would read 0,0
-      const rect = btn.getBoundingClientRect();
-      openRowMenuId = opening ? id : null;
+      openRowMenuId = openRowMenuId === id ? null : id;
       renderAll();
-      if (opening) {
-        const menu = tbody.querySelector(`[data-row-menu="${id}"]`);
-        menu.style.position = 'fixed';
-        menu.style.top = `${rect.bottom + 4}px`;
-        menu.style.right = `${window.innerWidth - rect.right}px`;
-      }
     });
   });
 
@@ -951,6 +965,7 @@ function renderAll() {
   renderExpenseTable();
   renderDebtSummary();
   renderKpis();
+  renderRowMenu();
 }
 
 // one-time import of the user's real spreadsheet data, requested explicitly —
