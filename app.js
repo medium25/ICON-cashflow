@@ -83,15 +83,37 @@ function getRows() { return CACHE.rows; }
 function getExpenses() { return CACHE.expenses; }
 function getBalances() { return CACHE.balances; }
 
+// Pure calendar-string arithmetic, all in UTC (both parse and format), so it
+// never shifts by a day depending on the browser's local timezone offset —
+// consistent with todayStr() elsewhere treating date strings as UTC days.
+function addDays(dateStr, delta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+
+// true if this method has any recorded activity (a saved balance entry or a
+// non-deleted expense) strictly before `date` — used to stop the day-by-day
+// carry-forward in getBalanceEntry once we're past the method's real history.
+function hasEarlierActivity(method, date) {
+  const balances = getBalances();
+  const prefix = `${method}_`;
+  const hasBalanceEntry = Object.keys(balances).some(k => k.startsWith(prefix) && k.slice(prefix.length) < date);
+  if (hasBalanceEntry) return true;
+  return getExpenses().some(e => e.method === method && e.date < date && !e.deleted);
+}
+
 function getBalanceEntry(method, date) {
   const entry = getBalances()[`${method}_${date}`];
   if (entry) return { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [], wasTs: entry.wasTs, incomeTs: entry.incomeTs };
-  // no record yet for this day — carry yesterday's Остаток into "Было", everything else starts at 0
-  const balances = getBalances();
-  const prefix = `${method}_`;
-  const priorDates = Object.keys(balances).filter(k => k.startsWith(prefix) && k.slice(prefix.length) < date).map(k => k.slice(prefix.length));
-  const prevDate = priorDates.sort().pop();
-  return { was: prevDate ? methodRemainder(method, prevDate) : 0, income: 0, sources: [] };
+  // No record yet for this day — carry the PREVIOUS CALENDAR DAY's Остаток into
+  // "Было" (everything else starts at 0). This recurses one day at a time
+  // (rather than jumping to the nearest day that happens to have a saved
+  // balance entry), so a day nobody touched "Было"/"Поступило" still has its
+  // own expenses subtracted before the balance carries forward.
+  if (!hasEarlierActivity(method, date)) return { was: 0, income: 0, sources: [] };
+  return { was: methodRemainder(method, addDays(date, -1)), income: 0, sources: [] };
 }
 function saveBalanceEntry(method, date, entry) {
   const balances = getBalances();
