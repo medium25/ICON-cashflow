@@ -104,16 +104,34 @@ function hasEarlierActivity(method, date) {
   return getExpenses().some(e => e.method === method && e.date < date && !e.deleted);
 }
 
+// getBalanceEntry recurses through every day back to the last saved entry,
+// and methodTotal/methodNewIncome/sourcesSum each call it again for the same
+// (method, date) — without caching, that's 3 calls per recursion level, so a
+// gap of N days becomes 3^N calls (a multi-month gap between saved "Было"
+// entries — normal usage, since not every day gets touched — made this
+// effectively hang). Memoizing collapses it back to one computation per day.
+// Cleared at the top of renderAll() so every render still reflects current data.
+let balanceEntryCache = new Map();
 function getBalanceEntry(method, date) {
-  const entry = getBalances()[`${method}_${date}`];
-  if (entry) return { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [], wasTs: entry.wasTs, incomeTs: entry.incomeTs };
-  // No record yet for this day — carry the PREVIOUS CALENDAR DAY's Остаток into
-  // "Было" (everything else starts at 0). This recurses one day at a time
-  // (rather than jumping to the nearest day that happens to have a saved
-  // balance entry), so a day nobody touched "Было"/"Поступило" still has its
-  // own expenses subtracted before the balance carries forward.
-  if (!hasEarlierActivity(method, date)) return { was: 0, income: 0, sources: [] };
-  return { was: methodRemainder(method, addDays(date, -1)), income: 0, sources: [] };
+  const cacheKey = `${method}_${date}`;
+  if (balanceEntryCache.has(cacheKey)) return balanceEntryCache.get(cacheKey);
+  const entry = getBalances()[cacheKey];
+  let result;
+  if (entry) {
+    result = { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [], wasTs: entry.wasTs, incomeTs: entry.incomeTs };
+  } else if (!hasEarlierActivity(method, date)) {
+    // No record yet for this day and nothing earlier — carry 0 into "Было".
+    result = { was: 0, income: 0, sources: [] };
+  } else {
+    // No record yet for this day — carry the PREVIOUS CALENDAR DAY's Остаток
+    // into "Было" (everything else starts at 0). Recurses one day at a time
+    // (rather than jumping to the nearest day that happens to have a saved
+    // balance entry), so a day nobody touched "Было"/"Поступило" still has
+    // its own expenses subtracted before the balance carries forward.
+    result = { was: methodRemainder(method, addDays(date, -1)), income: 0, sources: [] };
+  }
+  balanceEntryCache.set(cacheKey, result);
+  return result;
 }
 function saveBalanceEntry(method, date, entry) {
   const balances = getBalances();
@@ -862,6 +880,7 @@ function renderDebtSummary() {
 }
 
 function renderAll() {
+  balanceEntryCache.clear();
   renderMethods();
   renderExpenseTable();
   renderDebtSummary();

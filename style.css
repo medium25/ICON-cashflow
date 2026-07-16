@@ -17,22 +17,21 @@
   --accent: #0071e3;
   --accent-press: #0059b3;
   --orange: #ff9f0a;
-  --expense-bg: #fdecea;
-  --expense-bg-hover: #fbdedb;
   --radius-lg: 24px;
   --radius-md: 16px;
   --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
 
-  /* Liquid Glass — translucent, blurred, light-catching surfaces used on
-     floating/card containers and controls. Dense data (tables, inputs) keeps
-     --surface-tint's higher opacity so numbers stay legible. */
-  --glass-surface: rgba(255, 255, 255, 0.55);
-  --glass-surface-strong: rgba(255, 255, 255, 0.78);
+  /* Liquid Glass — translucent, light-catching surfaces used on floating/card
+     containers and controls. No backdrop-filter blur: it's too expensive to
+     composite reliably across devices once several of these are on screen
+     at once (caused real hangs), so the glass look comes from transparency
+     + the blurred color blobs behind the page (see body::before) alone. */
+  --glass-surface: rgba(255, 255, 255, 0.7);
+  --glass-surface-strong: rgba(255, 255, 255, 0.85);
   --glass-border: rgba(255, 255, 255, 0.55);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.75);
   --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.1), 0 2px 10px rgba(0, 0, 0, 0.05);
-  --glass-blur: blur(24px) saturate(180%);
 }
 
 * { box-sizing: border-box; }
@@ -107,8 +106,6 @@ body::before {
 .modal-overlay.hidden { display: none; }
 .modal {
   background: var(--glass-surface-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--glass-shadow), var(--glass-highlight);
@@ -138,8 +135,6 @@ body::before {
 .modal-tab {
   border: 1px solid var(--glass-border);
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 590;
@@ -225,8 +220,6 @@ body::before {
 .filter-chip {
   border: 1px solid var(--glass-border);
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 590;
@@ -255,8 +248,6 @@ body::before {
 }
 .kpi-card {
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--glass-shadow), var(--glass-highlight);
@@ -303,8 +294,6 @@ body::before {
 .method-col {
   position: relative;
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--glass-shadow), var(--glass-highlight);
@@ -370,21 +359,16 @@ body::before {
   font-size: 15px;
   border-bottom: 1px solid var(--border);
   transition: background 0.12s ease;
-  background: var(--expense-bg);
-  box-shadow: inset 3px 0 0 #c0392b, 0 0 14px rgba(192, 57, 43, 0.3);
 }
-.cat-row:hover { background: var(--expense-bg-hover); }
+.cat-row:hover { background: var(--surface-tint); }
 .cat-index {
   grid-column: 1;
   justify-self: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  border: 1px solid var(--glass-border);
-  /* no backdrop-filter here — this repeats once per expense entry, and
-     blurring dozens of small independent layers is what made the page
-     unresponsive with real data. A flat tinted circle reads the same. */
-  background: var(--glass-surface-strong);
+  border: 1.5px solid var(--border-strong);
+  background: none;
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 650;
@@ -394,12 +378,21 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 5px rgba(255, 255, 255, 0.35);
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .cat-index:hover { border-color: var(--accent); color: var(--accent); }
-.cat-row .cat-name { color: #c0392b; font-weight: 600; transition: color 0.12s ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.cat-row .cat-amount { color: #c0392b; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.12s ease; }
+/* checked = paid — a plain filled green circle reads as "done" without any
+   glow/shadow noise; unchecked stays a quiet neutral ring until you act on it */
+.cat-row.checked .cat-index {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+.cat-row .cat-name { color: var(--text); font-weight: 500; transition: color 0.12s ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cat-row .cat-amount { color: var(--red); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.12s ease; }
+/* paid items recede — muted and struck through — so the eye goes straight
+   to what's still outstanding */
+.cat-row.checked .cat-name, .cat-row.checked .cat-amount { color: var(--text-muted); text-decoration: line-through; }
 .cat-row .cat-del {
   justify-self: center;
   border: none;
@@ -454,8 +447,6 @@ body::before {
 .autocomplete-menu {
   position: fixed;
   background: var(--glass-surface-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--glass-shadow), var(--glass-highlight);
@@ -577,8 +568,6 @@ body::before {
   justify-self: center;
   border: 1px solid var(--glass-border);
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text-muted);
   width: 24px;
   height: 24px;
@@ -642,8 +631,6 @@ body::before {
 /* Panel / main table */
 .panel {
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--glass-shadow), var(--glass-highlight);
@@ -700,8 +687,6 @@ body::before {
 .btn-primary:hover { background: linear-gradient(180deg, rgba(30, 144, 255, 1), var(--accent-press) 70%); }
 .btn-secondary {
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text);
 }
 .btn-secondary:hover { background: var(--glass-surface-strong); }
@@ -808,8 +793,6 @@ body::before {
   flex-direction: column;
   min-width: 200px;
   background: var(--glass-surface-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   box-shadow: var(--glass-shadow), var(--glass-highlight);
@@ -888,11 +871,9 @@ body::before {
   --text-muted: #98989d;
   --head-bg: #ffffff;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
-  --expense-bg: #3d1c1e;
-  --expense-bg-hover: #4a2224;
 
-  --glass-surface: rgba(40, 40, 46, 0.55);
-  --glass-surface-strong: rgba(50, 50, 56, 0.75);
+  --glass-surface: rgba(40, 40, 46, 0.72);
+  --glass-surface-strong: rgba(50, 50, 56, 0.85);
   --glass-border: rgba(255, 255, 255, 0.12);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.09);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.3);
@@ -908,8 +889,6 @@ body::before {
   border-radius: 50%;
   border: 1px solid var(--glass-border);
   background: var(--glass-surface-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text);
   font-size: 20px;
   cursor: pointer;
