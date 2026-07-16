@@ -1,14 +1,105 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/productivityapp2/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>productivity-hub</title>
-    <script type="module" crossorigin src="/productivityapp2/index.js"></script>
-    <link rel="stylesheet" crossorigin href="/productivityapp2/index.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cashflow Tracker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="authGate" class="hidden"></div>
+
+<div class="app hidden" id="app">
+
+  <header class="topbar">
+    <h1>ICON FINANCE</h1>
+    <div class="topbar-right">
+      <div class="date-display" id="todayDate"></div>
+      <a href="history.html" class="btn btn-secondary">История</a>
+    </div>
+  </header>
+
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Поступило</div>
+      <div class="kpi-value" id="kpiIn">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Потратили сегодня</div>
+      <div class="kpi-value" id="kpiOut">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Осталось</div>
+      <div class="kpi-value" id="kpiLeft">0</div>
+    </div>
+  </div>
+
+  <div class="methods-row" id="methodsRow">
+    <!-- 3 method blocks (Категории / Было-Поступило / Остаток), filled by JS -->
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Наименования</h2>
+      <div class="panel-head-actions">
+        <button id="newMonthBtn" class="btn btn-secondary admin-only">Перейти к новому месяцу</button>
+        <button id="toggleAddRow" class="btn btn-secondary admin-only">+ Добавить</button>
+      </div>
+    </div>
+
+    <form id="newRowForm" class="inline-form hidden admin-only">
+      <input type="text" id="newRowPayDate" placeholder="Дата (любая, 5 число...)">
+      <input type="text" id="newRowName" placeholder="Название" required>
+      <input type="text" inputmode="numeric" id="newRowDue" placeholder="Должны" data-amount required>
+      <button type="submit" class="btn btn-primary">Добавить</button>
+      <button type="button" id="cancelAddRow" class="btn btn-secondary">Отмена</button>
+    </form>
+
+    <table class="data-table expense-table">
+      <thead>
+        <tr>
+          <th class="drag-col"></th>
+          <th>Дата</th>
+          <th>Наименования</th>
+          <th class="num">Должны</th>
+          <th class="num">Отдали Сегодня</th>
+          <th class="num">Отдали в этом месяце</th>
+          <th class="num">Разница</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="expenseTableBody"></tbody>
+      <tfoot id="expenseTableFoot"></tfoot>
+    </table>
+  </div>
+
+  <div class="panel" id="debtSummaryPanel">
+    <div class="panel-head">
+      <h2>Долги</h2>
+    </div>
+    <table class="data-table debt-summary-table">
+      <thead>
+        <tr>
+          <th>Наименования</th>
+          <th class="num">Должны</th>
+          <th class="num">Отдали в этом месяце</th>
+          <th class="num">Осталось</th>
+        </tr>
+      </thead>
+      <tbody id="debtSummaryBody"></tbody>
+      <tfoot id="debtSummaryFoot"></tfoot>
+    </table>
+  </div>
+
+</div>
+
+<button id="themeToggle" class="theme-toggle" title="Тема">🌙</button>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
 </html>
