@@ -79,14 +79,12 @@ body::before {
   pointer-events: none;
 }
 :root[data-theme="dark"] body::before {
-  /* Apple liquid-glass needs color behind the glass to refract — restored
-     for dark mode only (light mode stays flat per earlier request). Tuned
-     to the Apple palette: Sky Link Blue, System Green/Red/Orange. */
-  background:
-    radial-gradient(circle at 12% 18%, rgba(41, 151, 255, 0.30), transparent 42%),
-    radial-gradient(circle at 88% 12%, rgba(52, 199, 89, 0.22), transparent 40%),
-    radial-gradient(circle at 55% 88%, rgba(255, 159, 10, 0.18), transparent 45%),
-    radial-gradient(circle at 92% 92%, rgba(224, 57, 63, 0.16), transparent 40%);
+  /* One quiet light source, not a rainbow — a neutral white glow from
+     upper-left, like a window lighting the glass from one direction. Was
+     cool-blue-tinted before; pulled back to neutral white so the page
+     reads as true black/gray, not navy. */
+  background: radial-gradient(ellipse 70% 50% at 20% 0%, rgba(255, 255, 255, 0.1), transparent 60%);
+  filter: blur(90px);
 }
 
 .app {
@@ -342,6 +340,9 @@ body::before {
 .method-col.stripe-green::before { background: var(--green); box-shadow: 0 0 9px 1px var(--green); }
 .method-col.stripe-red::before { background: var(--red); box-shadow: 0 0 9px 1px var(--red); }
 .method-col.stripe-blue::before { background: var(--accent); box-shadow: 0 0 9px 1px var(--accent); }
+/* the neon glow is a Liquid Glass flourish — the colored stripe looks like
+   it's lit from within the material. Dark-only: on light backgrounds a
+   glow reads as a muddy halo rather than an internal light source. */
 :root:not([data-theme="dark"]) .method-col::before { box-shadow: none; }
 
 /* children that sit at the card's rounded top/bottom edges need their own
@@ -607,9 +608,10 @@ body::before {
   align-items: center;
   justify-content: center;
   box-shadow: var(--glass-highlight);
-  transition: background 0.12s ease, color 0.12s ease;
+  opacity: 0.45;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
-.btn-kebab:hover { background: var(--accent); color: white; }
+.btn-kebab:hover { background: var(--accent); color: white; opacity: 1; }
 
 .source-add-row {
   display: flex;
@@ -820,6 +822,10 @@ body::before {
   transition: background 0.12s ease, color 0.12s ease;
 }
 .btn-icon:hover { background: var(--glass-surface-strong); color: var(--text); }
+/* the row ⋯ menu toggle specifically (not the ✓/✕ edit-form buttons,
+   which share .btn-icon) — dimmed so it recedes until you hover it. */
+.btn-icon[data-row-menu-toggle] { opacity: 0.45; transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease; }
+.btn-icon[data-row-menu-toggle]:hover { opacity: 1; }
 
 .row-menu {
   position: fixed;
@@ -900,11 +906,13 @@ body::before {
 }
 
 :root[data-theme="dark"] {
-  /* Apple's dark-tile palette — systemBackground dark gray, not OLED black.
-     See design-md/apple (surface-tile-1/2/3). */
-  --bg: #1c1c1e;
-  --surface: #232325;
-  --surface-tint: #2c2c2e;
+  /* Near-black charcoal, not flat #000 — pure black read too harsh/flat
+     against a photo reference of a soft dark gray. Body font-family is
+     already -apple-system/SF Pro globally (see body{} above) — SwiftUI's
+     own native stack — so no per-theme font override is needed here. */
+  --bg: #1a1a1c;
+  --surface: #202022;
+  --surface-tint: #29292b;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
   --text: #ffffff;
@@ -914,20 +922,38 @@ body::before {
 
   /* Sky Link Blue — Apple's own dark-surface accent; Action Blue #0071e3
      "disappears against tile background" per Apple's design spec, so the
-     accent shifts brighter on dark, same as Apple's real site does. */
+     accent shifts brighter on dark, same as apple.com itself does. System
+     green/red match the SwiftUI semantic-color palette (systemGreen/Red)
+     at their dark-appearance values. */
   --blue: #2997ff;
   --accent: #2997ff;
   --accent-press: #0071e3;
+  --green: #30d158;
+  --red: #ff453a;
 
-  /* Liquid glass: richer blur/saturation than light mode so the colored
-     blooms behind the glass (body::before) actually read through it. */
-  --glass-blur: blur(30px) saturate(220%);
-  --glass-surface: rgba(255, 255, 255, 0.08);
-  --glass-surface-strong: rgba(255, 255, 255, 0.14);
-  --glass-border: rgba(255, 255, 255, 0.22);
-  --glass-tint: rgba(255, 255, 255, 0.13);
-  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(0, 0, 0, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.18), inset -1px 0 0 rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 2px 10px rgba(0, 0, 0, 0.4);
+  /* Liquid Glass (iOS 26 / macOS Tahoe material): a heavier blur+saturate
+     than light mode so the colored blooms behind the glass (body::before)
+     actually refract through it, a brighter specular top-edge to sell a
+     lit-from-above material, and a floating shadow with a tight contact
+     layer plus a soft ambient spread — the two-layer shadow real Liquid
+     Glass panels use to look like they're hovering just above the surface
+     beneath them. */
+  --glass-blur: blur(38px) saturate(240%);
+  /* Neutral white, not blue-tinted — the cool cast was reading as navy
+     against true black. Plain white keeps the material neutral. */
+  --glass-surface: rgba(255, 255, 255, 0.012);
+  --glass-surface-strong: rgba(255, 255, 255, 0.02);
+  --glass-border: rgba(255, 255, 255, 0.11);
+  --glass-tint: rgba(255, 255, 255, 0.025);
+  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(0, 0, 0, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.25), inset -1px 0 0 rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 1px 1px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.55), 0 26px 56px rgba(0, 0, 0, 0.4);
+
+  /* Apple's own radius scale (design-md/apple: {rounded.lg} 18px on cards,
+     {rounded.pill} on every CTA) — restores the app's default light-theme
+     values rather than a brand-specific override. */
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
 }
 
 .theme-toggle {
