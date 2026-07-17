@@ -79,14 +79,14 @@ body::before {
   pointer-events: none;
 }
 :root[data-theme="dark"] body::before {
-  background: none;
-  /*
+  /* Apple liquid-glass needs color behind the glass to refract — restored
+     for dark mode only (light mode stays flat per earlier request). Tuned
+     to the Apple palette: Sky Link Blue, System Green/Red/Orange. */
   background:
-    radial-gradient(circle at 12% 18%, rgba(0, 113, 227, 0.32), transparent 42%),
-    radial-gradient(circle at 88% 12%, rgba(52, 199, 89, 0.26), transparent 40%),
-    radial-gradient(circle at 55% 88%, rgba(255, 159, 10, 0.22), transparent 45%),
-    radial-gradient(circle at 92% 92%, rgba(224, 57, 63, 0.18), transparent 40%);
-  */
+    radial-gradient(circle at 12% 18%, rgba(41, 151, 255, 0.30), transparent 42%),
+    radial-gradient(circle at 88% 12%, rgba(52, 199, 89, 0.22), transparent 40%),
+    radial-gradient(circle at 55% 88%, rgba(255, 159, 10, 0.18), transparent 45%),
+    radial-gradient(circle at 92% 92%, rgba(224, 57, 63, 0.16), transparent 40%);
 }
 
 .app {
@@ -900,23 +900,34 @@ body::before {
 }
 
 :root[data-theme="dark"] {
-  --bg: #1e1e21;
-  --surface: #1c1c1e;
+  /* Apple's dark-tile palette — systemBackground dark gray, not OLED black.
+     See design-md/apple (surface-tile-1/2/3). */
+  --bg: #1c1c1e;
+  --surface: #232325;
   --surface-tint: #2c2c2e;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --text: #f5f5f7;
+  --text: #ffffff;
   --text-muted: #98989d;
   --head-bg: #ffffff;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
 
-  /* Clean, even frosted-white-on-black glass — flat tint, no diagonal sheen. */
-  --glass-surface: rgba(255, 255, 255, 0.07);
-  --glass-surface-strong: rgba(255, 255, 255, 0.12);
-  --glass-border: rgba(255, 255, 255, 0.2);
-  --glass-tint: rgba(255, 255, 255, 0.12);
-  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(0, 0, 0, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.15), inset -1px 0 0 rgba(255, 255, 255, 0.08);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.35);
+  /* Sky Link Blue — Apple's own dark-surface accent; Action Blue #0071e3
+     "disappears against tile background" per Apple's design spec, so the
+     accent shifts brighter on dark, same as Apple's real site does. */
+  --blue: #2997ff;
+  --accent: #2997ff;
+  --accent-press: #0071e3;
+
+  /* Liquid glass: richer blur/saturation than light mode so the colored
+     blooms behind the glass (body::before) actually read through it. */
+  --glass-blur: blur(30px) saturate(220%);
+  --glass-surface: rgba(255, 255, 255, 0.08);
+  --glass-surface-strong: rgba(255, 255, 255, 0.14);
+  --glass-border: rgba(255, 255, 255, 0.22);
+  --glass-tint: rgba(255, 255, 255, 0.13);
+  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(0, 0, 0, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.18), inset -1px 0 0 rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
 .theme-toggle {
