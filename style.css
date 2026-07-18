@@ -345,6 +345,30 @@ body::before {
    glow reads as a muddy halo rather than an internal light source. */
 :root:not([data-theme="dark"]) .method-col::before { box-shadow: none; }
 
+/* Dark theme adds a rounded icon-badge next to the title, on top of the
+   glowing edge stripe (kept — liked separately from the badge). */
+:root[data-theme="dark"] .col-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 22px;
+}
+:root[data-theme="dark"] .col-head::before {
+  content: "";
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+:root[data-theme="dark"] .method-col.stripe-green .col-head::before { content: "↑"; background: rgba(48, 209, 88, 0.18); color: var(--green); }
+:root[data-theme="dark"] .method-col.stripe-red .col-head::before { content: "↓"; background: rgba(255, 69, 58, 0.18); color: var(--red); }
+:root[data-theme="dark"] .method-col.stripe-blue .col-head::before { content: "Σ"; background: rgba(41, 151, 255, 0.18); color: var(--accent); }
+
 /* children that sit at the card's rounded top/bottom edges need their own
    matching radius now that the card no longer clips its content */
 .method-col .col-head:first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
@@ -359,7 +383,7 @@ body::before {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  padding: 18px 20px 8px;
+  padding: 18px 44px 8px 20px;
   color: var(--text);
 }
 
@@ -593,25 +617,33 @@ body::before {
 .source-del:hover { color: var(--red); }
 
 .btn-kebab {
-  grid-column: 3;
-  justify-self: center;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-tint);
+  /* Reference card design puts the "···" menu flush in the card's top-right
+     corner, next to the title — not inline in a data row. Absolute-position
+     it there instead of moving it in the markup; it stays the true last
+     child of `.balance-row.sum` in the DOM (see app.js), it just no longer
+     renders in that row's flow, so that row's reserved action column is
+     simply empty now (matches the blank slot every other balance-row
+     already has when it has no trailing button). */
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border: none;
+  background: none;
   color: var(--text-muted);
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--glass-highlight);
-  opacity: 0.45;
+  box-shadow: none;
+  opacity: 0.5;
   transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
-.btn-kebab:hover { background: var(--accent); color: white; opacity: 1; }
+.btn-kebab:hover { background: var(--glass-tint); color: var(--text); opacity: 1; }
 
 .source-add-row {
   display: flex;
@@ -940,11 +972,13 @@ body::before {
      beneath them. */
   --glass-blur: blur(38px) saturate(240%);
   /* Neutral white, not blue-tinted — the cool cast was reading as navy
-     against true black. Plain white keeps the material neutral. */
-  --glass-surface: rgba(255, 255, 255, 0.012);
-  --glass-surface-strong: rgba(255, 255, 255, 0.02);
-  --glass-border: rgba(255, 255, 255, 0.11);
-  --glass-tint: rgba(255, 255, 255, 0.025);
+     against true black. Plain white keeps the material neutral. Pulled
+     back up from near-invisible — the reference's cards render as clearly
+     defined boxes, not almost-flush-with-the-page panels. */
+  --glass-surface: rgba(255, 255, 255, 0.045);
+  --glass-surface-strong: rgba(255, 255, 255, 0.075);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-tint: rgba(255, 255, 255, 0.06);
   --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(0, 0, 0, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.25), inset -1px 0 0 rgba(255, 255, 255, 0.14);
   --glass-shadow: 0 1px 1px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.55), 0 26px 56px rgba(0, 0, 0, 0.4);
 
