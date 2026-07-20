@@ -492,6 +492,7 @@ function renderMethods() {
 
   container.querySelectorAll('[data-balance-was]').forEach(input => {
     input.addEventListener('focus', () => input.select());
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
     input.addEventListener('change', () => {
       setWas(input.dataset.balanceWas, date, parseAmount(input));
       renderAll();
@@ -499,6 +500,7 @@ function renderMethods() {
   });
   container.querySelectorAll('[data-balance-income]').forEach(input => {
     input.addEventListener('focus', () => input.select());
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
     input.addEventListener('change', () => {
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
       renderAll();
