@@ -450,14 +450,14 @@ function renderMethods() {
               ${state.isAdmin
                 ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-was="${method}" data-amount value="${bal.was ? fmt(bal.was) : ''}" placeholder="0">`
                 : `<span class="balance-input-static">${fmt(bal.was)}</span>`}
-              ${state.isAdmin ? `<button type="button" class="balance-save-btn" data-balance-save-was="${method}" title="Сохранить">+</button>` : ''}
+              ${state.isAdmin ? `<button type="button" class="balance-save-btn" data-balance-clear-was="${method}" title="Очистить">✕</button>` : ''}
             </div>
             <div class="balance-row">
               <span class="balance-label">Поступило</span>
               ${state.isAdmin
                 ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-income="${method}" data-amount value="${bal.income ? fmt(bal.income) : ''}" placeholder="0">`
                 : `<span class="balance-input-static">${fmt(bal.income)}</span>`}
-              ${state.isAdmin ? `<button type="button" class="balance-save-btn" data-balance-save-income="${method}" title="Сохранить">+</button>` : ''}
+              ${state.isAdmin ? `<button type="button" class="balance-save-btn" data-balance-clear-income="${method}" title="Очистить">✕</button>` : ''}
             </div>
             ${state.isAdmin ? `
             <form class="source-add-row ${sourceFormOpen ? '' : 'hidden'}" data-source-form="${method}">
@@ -550,17 +550,19 @@ function renderMethods() {
       renderAll();
     });
   });
-  container.querySelectorAll('[data-balance-save-was]').forEach(btn => {
+  container.querySelectorAll('[data-balance-clear-was]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const input = btn.parentElement.querySelector('[data-balance-was]');
-      setWas(btn.dataset.balanceSaveWas, date, parseAmount(input));
+      const method = btn.dataset.balanceClearWas;
+      if (!confirm(`Обнулить «Было» ${METHOD_PHRASE[method]}?`)) return;
+      setWas(method, date, 0);
       renderAll();
     });
   });
-  container.querySelectorAll('[data-balance-save-income]').forEach(btn => {
+  container.querySelectorAll('[data-balance-clear-income]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const input = btn.parentElement.querySelector('[data-balance-income]');
-      setIncome(btn.dataset.balanceSaveIncome, date, parseAmount(input));
+      const method = btn.dataset.balanceClearIncome;
+      if (!confirm(`Обнулить «Поступило» ${METHOD_PHRASE[method]}?`)) return;
+      setIncome(method, date, 0);
       renderAll();
     });
   });

@@ -644,7 +644,10 @@ body::before {
   justify-content: center;
   transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), border-color 0.2s var(--ease-smooth);
 }
-.balance-save-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+/* red, not accent — this button clears the field (destructive), matching
+   .cat-del/.source-del's red hover elsewhere in the app rather than reading
+   as a confirm/save action. */
+.balance-save-btn:hover { background: var(--red); color: white; border-color: var(--red); }
 .balance-save-btn:active { opacity: 0.6; }
 
 .btn-kebab {
