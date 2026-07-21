@@ -547,7 +547,10 @@ body::before {
    so numbers align whether or not that row has a delete button */
 .balance-row {
   display: grid;
-  grid-template-columns: minmax(56px, 1fr) minmax(70px, 1.05fr) 24px;
+  /* last column widened 24px -> 32px to fit .balance-save-btn at its
+     current 30px size — it was overflowing its old 24px track and
+     overlapping the input's click area, which silently ate "+" clicks. */
+  grid-template-columns: minmax(56px, 1fr) minmax(70px, 1.05fr) 32px;
   align-items: center;
   gap: 10px;
   padding: 11px 20px;

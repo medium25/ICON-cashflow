@@ -101,8 +101,12 @@ function isSuspiciousShrink(previousValue, nextValue) {
 // before an overwrite into a separate doc. Fire-and-forget — never blocks
 // or delays the real save, so a backup failure can't break normal use.
 function backupPreviousValue(cacheKey, previousValue) {
+  // Firestore rejects `undefined` field values outright (e.g. a balance
+  // entry whose wasTs/incomeTs was never set) — round-tripping through
+  // JSON drops those keys instead of letting the whole backup write reject.
+  const sanitized = JSON.parse(JSON.stringify(previousValue));
   db.collection('cashflow_backups').doc(cacheKey)
-    .set({ data: previousValue, ts: Date.now() })
+    .set({ data: sanitized, ts: Date.now() })
     .catch((err) => console.error('Backup failed', err));
 }
 
@@ -122,11 +126,16 @@ function save(key, value) {
     }
   }
   backupPreviousValue(cacheKey, previous);
-  CACHE[cacheKey] = value; // optimistic — renderAll() called right after a mutation sees the change immediately
+  CACHE[cacheKey] = value;
   db.collection('cashflow').doc(cacheKey).set({ data: value }).catch((err) => {
     console.error('Save failed', err);
     alert('Не удалось сохранить: проверьте соединение.');
   });
+  // save() is the one place every mutation passes through — rendering here
+  // (rather than trusting every caller to remember renderAll() afterward)
+  // is what actually keeps the on-screen totals in sync with what just got
+  // written, instead of only updating on the next unrelated re-render.
+  renderCurrentPage();
 }
 
 function getRows() { return CACHE.rows; }
