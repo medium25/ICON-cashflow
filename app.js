@@ -429,7 +429,7 @@ function renderMethods() {
             </div>
             ${state.isAdmin ? `
             <form class="source-add-row ${sourceFormOpen ? '' : 'hidden'}" data-source-form="${method}">
-              <input type="text" placeholder="Название источника" data-source-label required>
+              <input type="text" placeholder="Название источника (необязательно)" data-source-label>
               <input type="text" inputmode="numeric" placeholder="Сумма" data-source-amount data-amount required>
               <button type="submit" class="btn btn-primary">Добавить</button>
             </form>` : ''}
@@ -548,9 +548,12 @@ function renderMethods() {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const method = form.dataset.sourceForm;
-      const label = form.querySelector('[data-source-label]').value.trim();
+      const label = form.querySelector('[data-source-label]').value.trim() || 'Доход';
       const amount = parseAmount(form.querySelector('[data-source-amount]'));
-      if (!label || !amount || amount <= 0) return;
+      if (!amount || amount <= 0) {
+        alert('Укажите сумму больше нуля.');
+        return;
+      }
       addSource(method, date, label, amount);
       openSourceForm = null;
       renderAll();

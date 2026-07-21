@@ -625,21 +625,23 @@ body::before {
 
 .balance-save-btn {
   justify-self: center;
-  border: none;
-  background: var(--accent);
-  color: white;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-  width: 22px;
-  height: 22px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-tint);
+  color: var(--text-muted);
   border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.2s var(--ease-smooth);
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), border-color 0.2s var(--ease-smooth);
 }
+.balance-save-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
 .balance-save-btn:active { opacity: 0.6; }
 
 .btn-kebab {
