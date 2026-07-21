@@ -21,6 +21,10 @@
   --radius-md: 16px;
   --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
+  /* Apple's own deceleration curve (UIKit/SwiftUI's easeOut-ish spring
+     approximation) — used everywhere something used to transition on
+     plain `ease`, for a smoother, less linear-feeling settle. */
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* Liquid Glass — translucent, blurred surfaces on floating/card containers.
      backdrop-filter is applied ONLY here (panel/kpi-card/method-col/modal/
@@ -79,12 +83,11 @@ body::before {
   pointer-events: none;
 }
 :root[data-theme="dark"] body::before {
-  /* One quiet light source, not a rainbow — a neutral white glow from
-     upper-left, like a window lighting the glass from one direction. Was
-     cool-blue-tinted before; pulled back to neutral white so the page
-     reads as true black/gray, not navy. */
-  background: radial-gradient(ellipse 70% 50% at 20% 0%, rgba(255, 255, 255, 0.1), transparent 60%);
-  filter: blur(90px);
+  /* That light-source glow existed to give backdrop-filter something to
+     catch — with Liquid Glass removed there's no material left to light,
+     so the page goes flat like the rest of classic Apple UI. */
+  background: none;
+  filter: none;
 }
 
 .app {
@@ -162,7 +165,7 @@ body::before {
   border-radius: 980px;
   cursor: pointer;
   box-shadow: var(--glass-highlight);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .modal-tab:hover { background: var(--border); }
 .modal-tab.active { background: var(--accent); color: white; }
@@ -276,7 +279,9 @@ body::before {
   box-shadow: var(--glass-shadow), var(--glass-highlight);
   padding: 22px 24px;
   text-align: left;
+  transition: transform 0.3s var(--ease-smooth), box-shadow 0.3s var(--ease-smooth);
 }
+.kpi-card:hover { transform: translateY(-2px); }
 .kpi-label {
   font-size: 13px;
   font-weight: 590;
@@ -327,7 +332,9 @@ body::before {
      ::before rectangle instead, unrounded, so it runs the full height. */
   display: flex;
   flex-direction: column;
+  transition: transform 0.3s var(--ease-smooth), box-shadow 0.3s var(--ease-smooth);
 }
+.method-col:hover { transform: translateY(-2px); }
 .method-col::before {
   content: "";
   position: absolute;
@@ -410,7 +417,7 @@ body::before {
 .cat-row {
   font-size: 15px;
   border-bottom: 1px solid var(--border);
-  transition: background 0.12s ease;
+  transition: background 0.2s var(--ease-smooth);
 }
 .cat-row:hover { background: var(--surface-tint); }
 .cat-index {
@@ -430,7 +437,7 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), border-color 0.2s var(--ease-smooth);
 }
 .cat-index:hover { border-color: var(--accent); color: var(--accent); }
 /* checked = paid — a plain filled green circle reads as "done" without any
@@ -440,8 +447,8 @@ body::before {
   border-color: var(--green);
   color: white;
 }
-.cat-row .cat-name { color: var(--text); font-weight: 500; transition: color 0.12s ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.cat-row .cat-amount { color: var(--red); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.12s ease; }
+.cat-row .cat-name { color: var(--text); font-weight: 500; transition: color 0.2s var(--ease-smooth); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cat-row .cat-amount { color: var(--red); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.2s var(--ease-smooth); }
 /* paid items recede — muted and struck through — so the eye goes straight
    to what's still outstanding */
 .cat-row.checked .cat-name, .cat-row.checked .cat-amount { color: var(--text-muted); text-decoration: line-through; }
@@ -456,7 +463,7 @@ body::before {
   height: 22px;
   border-radius: 6px;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .cat-row:hover .cat-del { opacity: 1; }
 .cat-row .cat-del:hover { color: var(--red); }
@@ -531,7 +538,7 @@ body::before {
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), border-color 0.2s var(--ease-smooth);
 }
 .cat-add-row button:hover { background: var(--accent); color: white; border-color: var(--accent); }
 
@@ -579,7 +586,7 @@ body::before {
   font-variant-numeric: tabular-nums;
   color: var(--text);
   background: transparent;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color 0.2s var(--ease-smooth), background 0.2s var(--ease-smooth);
 }
 .balance-input::placeholder { color: var(--text-muted); font-weight: 500; }
 .balance-input:hover { background: var(--surface-tint); }
@@ -611,10 +618,29 @@ body::before {
   height: 22px;
   border-radius: 6px;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .balance-row:hover .source-del { opacity: 1; }
 .source-del:hover { color: var(--red); }
+
+.balance-save-btn {
+  justify-self: center;
+  border: none;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s var(--ease-smooth);
+}
+.balance-save-btn:active { opacity: 0.6; }
 
 .btn-kebab {
   /* Reference card design puts the "···" menu flush in the card's top-right
@@ -641,7 +667,7 @@ body::before {
   justify-content: center;
   box-shadow: none;
   opacity: 0.5;
-  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
 }
 .btn-kebab:hover { background: var(--glass-tint); color: var(--text); opacity: 1; }
 
@@ -745,7 +771,7 @@ body::before {
   font-weight: 590;
   cursor: pointer;
   box-shadow: var(--glass-highlight);
-  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease, opacity 0.12s ease;
+  transition: background 0.25s var(--ease-smooth), box-shadow 0.25s var(--ease-smooth), transform 0.18s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
 }
 .btn:active { transform: scale(0.97); }
 .btn-primary {
@@ -851,12 +877,12 @@ body::before {
   font-size: 13px;
   margin-left: 6px;
   box-shadow: var(--glass-highlight);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .btn-icon:hover { background: var(--glass-surface-strong); color: var(--text); }
 /* the row ⋯ menu toggle specifically (not the ✓/✕ edit-form buttons,
    which share .btn-icon) — dimmed so it recedes until you hover it. */
-.btn-icon[data-row-menu-toggle] { opacity: 0.45; transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease; }
+.btn-icon[data-row-menu-toggle] { opacity: 0.45; transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), opacity 0.2s var(--ease-smooth); }
 .btn-icon[data-row-menu-toggle]:hover { opacity: 1; }
 
 .row-menu {
@@ -963,24 +989,17 @@ body::before {
   --green: #30d158;
   --red: #ff453a;
 
-  /* Liquid Glass (iOS 26 / macOS Tahoe material): a heavier blur+saturate
-     than light mode so the colored blooms behind the glass (body::before)
-     actually refract through it, a brighter specular top-edge to sell a
-     lit-from-above material, and a floating shadow with a tight contact
-     layer plus a soft ambient spread — the two-layer shadow real Liquid
-     Glass panels use to look like they're hovering just above the surface
-     beneath them. */
-  --glass-blur: blur(38px) saturate(240%);
-  /* Neutral white, not blue-tinted — the cool cast was reading as navy
-     against true black. Plain white keeps the material neutral. Pulled
-     back up from near-invisible — the reference's cards render as clearly
-     defined boxes, not almost-flush-with-the-page panels. */
-  --glass-surface: rgba(255, 255, 255, 0.045);
-  --glass-surface-strong: rgba(255, 255, 255, 0.075);
-  --glass-border: rgba(255, 255, 255, 0.14);
-  --glass-tint: rgba(255, 255, 255, 0.06);
-  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 0 rgba(0, 0, 0, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.25), inset -1px 0 0 rgba(255, 255, 255, 0.14);
-  --glass-shadow: 0 1px 1px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.55), 0 26px 56px rgba(0, 0, 0, 0.4);
+  /* Liquid Glass material removed on request — no backdrop-filter, no
+     translucency, no specular bevel. Classic flat Apple style instead
+     (macOS System Settings / SwiftUI grouped-list): solid opaque surfaces,
+     a single soft ambient shadow, plain hairline borders. */
+  --glass-blur: none;
+  --glass-surface: #232325;
+  --glass-surface-strong: #2a2a2c;
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-tint: #2a2a2c;
+  --glass-highlight: 0 0 #0000;
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.3);
 
   /* Apple's own radius scale (design-md/apple: {rounded.lg} 18px on cards,
      {rounded.pill} on every CTA) — restores the app's default light-theme
@@ -989,6 +1008,10 @@ body::before {
   --radius-md: 16px;
   --radius-sm: 12px;
 }
+
+/* .panel hardcodes its own (lighter) blur independent of --glass-blur —
+   needs its own override to go flat too. */
+:root[data-theme="dark"] .panel { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 .theme-toggle {
   position: fixed;
@@ -1004,7 +1027,7 @@ body::before {
   font-size: 20px;
   cursor: pointer;
   box-shadow: var(--glass-shadow), var(--glass-highlight);
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition: transform 0.25s var(--ease-smooth), background 0.25s var(--ease-smooth);
 }
 .theme-toggle:hover { transform: scale(1.06); }
 .theme-toggle:active { transform: scale(0.95); }
