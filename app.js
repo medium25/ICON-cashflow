@@ -193,9 +193,31 @@ function getBalanceEntry(method, date) {
   return result;
 }
 function saveBalanceEntry(method, date, entry) {
+  const key = `${method}_${date}`;
   const balances = getBalances();
-  balances[`${method}_${date}`] = entry;
-  save(STORAGE.balances, balances);
+  balances[key] = entry;
+  if (!allDataLoaded()) {
+    console.error('Blocked saveBalanceEntry() before initial data finished loading');
+    alert('Данные ещё загружаются. Подождите пару секунд и повторите.');
+    return;
+  }
+  // Targeted field update, not save()'s whole-document .set() — "Было"/
+  // "Поступило" get edited constantly, often by more than one admin at
+  // once. A full-document overwrite here means whichever admin's save
+  // resolves last wins and silently wipes out everyone else's concurrent
+  // edits to every *other* date/method too (this was actually happening —
+  // see the 2026-07-21 "изменения не сохраняются" investigation). A
+  // dot-path update() only touches this one method_date entry, so two
+  // admins editing different rows (or even the same row at different
+  // times) can't stomp on each other's writes anymore. Sanitized through
+  // JSON first — Firestore rejects explicit `undefined` fields the same
+  // way it does for save()'s backups.
+  const sanitized = JSON.parse(JSON.stringify(entry));
+  db.collection('cashflow').doc('balances').update({ [`data.${key}`]: sanitized }).catch((err) => {
+    console.error('Balance save failed', err);
+    alert('Не удалось сохранить: проверьте соединение.');
+  });
+  renderCurrentPage();
 }
 function setWas(method, date, was) {
   const entry = getBalanceEntry(method, date);
@@ -999,6 +1021,22 @@ function setupGlobalEvents() {
   document.addEventListener('input', (e) => {
     if (e.target.matches('[data-amount]')) formatAmountInput(e.target);
     if (e.target.matches('[data-balance-was], [data-balance-income]')) updateLiveTotals(e.target);
+  });
+
+  // "Было"/"Поступило" only commit on Enter or blur — the live preview
+  // above makes an in-progress edit look already saved, so someone who
+  // types a number and closes the tab (or switches apps) without
+  // Enter/clicking away never actually persists it. Flush whatever's
+  // focused right before the page actually goes away, as a safety net.
+  const flushFocusedBalanceInput = () => {
+    const el = document.activeElement;
+    if (!el) return;
+    if (el.matches?.('[data-balance-was]')) setWas(el.dataset.balanceWas, todayStr(), parseAmount(el));
+    else if (el.matches?.('[data-balance-income]')) setIncome(el.dataset.balanceIncome, todayStr(), parseAmount(el));
+  };
+  window.addEventListener('beforeunload', flushFocusedBalanceInput);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushFocusedBalanceInput();
   });
 }
 
