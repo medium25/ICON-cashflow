@@ -250,6 +250,29 @@ function methodRemainder(method, date) {
   return methodTotal(method, date) - categorySum(method, date);
 }
 
+// Live preview only — updates "Сумма"/"Остаток" text as the admin types
+// into "Было"/"Поступило", without touching CACHE or Firestore. The real
+// commit (and the actual save) still only happens on Enter/blur/"+" — this
+// just stops the displayed total from looking stale while mid-edit.
+function updateLiveTotals(input) {
+  const method = input.dataset.balanceWas || input.dataset.balanceIncome;
+  if (!method) return;
+  const date = todayStr();
+  const block = input.closest('.method-block');
+  if (!block) return;
+  const wasInput = block.querySelector('[data-balance-was]');
+  const incomeInput = block.querySelector('[data-balance-income]');
+  const entry = getBalanceEntry(method, date);
+  const was = wasInput ? parseAmount(wasInput) : entry.was;
+  const income = incomeInput ? parseAmount(incomeInput) : entry.income;
+  const total = was + income + sourcesSum(method, date);
+  const remainder = total - categorySum(method, date);
+  const sumEl = block.querySelector('.balance-row.sum span:nth-child(2)');
+  if (sumEl) sumEl.textContent = fmt(total);
+  const remainderEl = block.querySelector('.result-value .result-number');
+  if (remainderEl) remainderEl.textContent = fmt(remainder);
+}
+
 // how much a given debt-row name was paid today, across all 3 methods
 function paidTodayByName(name, date) {
   return getExpenses()
@@ -967,6 +990,7 @@ function setupGlobalEvents() {
   // keeps working after any part of the page re-renders
   document.addEventListener('input', (e) => {
     if (e.target.matches('[data-amount]')) formatAmountInput(e.target);
+    if (e.target.matches('[data-balance-was], [data-balance-income]')) updateLiveTotals(e.target);
   });
 }
 
