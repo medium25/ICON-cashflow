@@ -250,27 +250,51 @@ function methodRemainder(method, date) {
   return methodTotal(method, date) - categorySum(method, date);
 }
 
-// Live preview only — updates "Сумма"/"Остаток" text as the admin types
-// into "Было"/"Поступило", without touching CACHE or Firestore. The real
-// commit (and the actual save) still only happens on Enter/blur/"+" — this
-// just stops the displayed total from looking stale while mid-edit.
-function updateLiveTotals(input) {
-  const method = input.dataset.balanceWas || input.dataset.balanceIncome;
-  if (!method) return;
+// Live preview only — updates "Сумма"/"Остаток"/the top KPI row as the
+// admin types into "Было"/"Поступило", without touching CACHE or Firestore.
+// The real commit (and the actual save) still only happens on Enter/blur —
+// this just stops the displayed totals from looking stale mid-edit.
+function liveBalanceValues(method) {
   const date = todayStr();
-  const block = input.closest('.method-block');
-  if (!block) return;
-  const wasInput = block.querySelector('[data-balance-was]');
-  const incomeInput = block.querySelector('[data-balance-income]');
+  const block = document.querySelector(`.method-block[data-method="${method}"]`);
+  const wasInput = block && block.querySelector('[data-balance-was]');
+  const incomeInput = block && block.querySelector('[data-balance-income]');
   const entry = getBalanceEntry(method, date);
   const was = wasInput ? parseAmount(wasInput) : entry.was;
   const income = incomeInput ? parseAmount(incomeInput) : entry.income;
-  const total = was + income + sourcesSum(method, date);
+  const srcSum = sourcesSum(method, date);
+  const total = was + income + srcSum;
   const remainder = total - categorySum(method, date);
+  return { was, income, srcSum, total, remainder };
+}
+
+function updateLiveTotals(input) {
+  const method = input.dataset.balanceWas || input.dataset.balanceIncome;
+  if (!method) return;
+  const block = input.closest('.method-block');
+  if (!block) return;
+  const { total, remainder } = liveBalanceValues(method);
   const sumEl = block.querySelector('.balance-row.sum span:nth-child(2)');
   if (sumEl) sumEl.textContent = fmt(total);
   const remainderEl = block.querySelector('.result-value .result-number');
   if (remainderEl) remainderEl.textContent = fmt(remainder);
+  updateLiveKpis();
+}
+
+// KPI row aggregates ALL THREE methods, not just the one being edited — so
+// unlike updateLiveTotals (scoped to the input's own block) this re-reads
+// every method's current on-screen values each time any one of them changes.
+function updateLiveKpis() {
+  let totalIncome = 0, totalLeft = 0;
+  METHODS.forEach(method => {
+    const v = liveBalanceValues(method);
+    totalIncome += v.income + v.srcSum;
+    totalLeft += v.remainder;
+  });
+  const kpiIn = document.getElementById('kpiIn');
+  const kpiLeft = document.getElementById('kpiLeft');
+  if (kpiIn) kpiIn.textContent = fmt(totalIncome);
+  if (kpiLeft) kpiLeft.textContent = fmt(totalLeft);
 }
 
 // how much a given debt-row name was paid today, across all 3 methods
@@ -450,14 +474,12 @@ function renderMethods() {
               ${state.isAdmin
                 ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-was="${method}" data-amount value="${bal.was ? fmt(bal.was) : ''}" placeholder="0">`
                 : `<span class="balance-input-static">${fmt(bal.was)}</span>`}
-              ${state.isAdmin ? `<button type="button" class="balance-save-btn" data-balance-clear-was="${method}" title="Очистить">✕</button>` : ''}
             </div>
             <div class="balance-row">
               <span class="balance-label">Поступило</span>
               ${state.isAdmin
                 ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-income="${method}" data-amount value="${bal.income ? fmt(bal.income) : ''}" placeholder="0">`
                 : `<span class="balance-input-static">${fmt(bal.income)}</span>`}
-              ${state.isAdmin ? `<button type="button" class="balance-save-btn" data-balance-clear-income="${method}" title="Очистить">✕</button>` : ''}
             </div>
             ${state.isAdmin ? `
             <form class="source-add-row ${sourceFormOpen ? '' : 'hidden'}" data-source-form="${method}">
@@ -547,22 +569,6 @@ function renderMethods() {
     });
     input.addEventListener('change', () => {
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
-      renderAll();
-    });
-  });
-  container.querySelectorAll('[data-balance-clear-was]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const method = btn.dataset.balanceClearWas;
-      if (!confirm(`Обнулить «Было» ${METHOD_PHRASE[method]}?`)) return;
-      setWas(method, date, 0);
-      renderAll();
-    });
-  });
-  container.querySelectorAll('[data-balance-clear-income]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const method = btn.dataset.balanceClearIncome;
-      if (!confirm(`Обнулить «Поступило» ${METHOD_PHRASE[method]}?`)) return;
-      setIncome(method, date, 0);
       renderAll();
     });
   });
