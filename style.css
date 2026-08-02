@@ -102,13 +102,10 @@ body::before {
   justify-content: space-between;
   margin-bottom: 28px;
 }
-.topbar h1 {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  margin: 0;
-  color: var(--text);
-}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
+.topbar h1.brand-wordmark { display: flex; align-items: center; gap: 10px; margin: 0; }
+.brand-wordmark img { height: 26px; width: auto; display: block; }
 .date-display { color: var(--text-muted); font-size: 14px; font-weight: 400; }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
 
@@ -1043,3 +1040,57 @@ body::before {
   margin-top: 12px;
 }
 .auth-toggle a { color: var(--accent); cursor: pointer; }
+
+/* ---------- historical date view ---------- */
+
+.view-date-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  background: rgba(255, 159, 10, 0.14);
+  border: 1px solid rgba(255, 159, 10, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+/* Same specificity as the generic .hidden rule, but declared later isn't
+   reliable — pin it explicitly so this element's own display:flex never
+   wins the cascade over being hidden. */
+.view-date-banner.hidden { display: none; }
+
+.view-date-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.view-date-confirm.hidden { display: none; }
+
+.date-picker-input {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.btn:disabled,
+.btn:disabled:hover {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}

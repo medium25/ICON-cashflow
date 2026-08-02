@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cashflow Tracker</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -12,11 +12,25 @@
 
 <div class="app hidden" id="app">
 
+  <div class="view-date-banner hidden" id="viewDateBanner">
+    <span id="viewDateBannerText"></span>
+    <button type="button" id="viewDateTodayBtn" class="btn btn-secondary">Сегодня</button>
+  </div>
+
+  <div class="view-date-confirm hidden" id="viewDateConfirm">
+    <span id="viewDateConfirmText"></span>
+    <button type="button" id="viewDateConfirmYes" class="btn btn-primary">Перейти</button>
+    <button type="button" id="viewDateConfirmNo" class="btn btn-secondary">Отмена</button>
+  </div>
+
   <header class="topbar">
-    <h1>ICON FINANCE</h1>
+    <div class="brand">
+      <img class="brand-mark" src="icon-mark.png" alt="" aria-hidden="true">
+      <h1 class="brand-wordmark"><img src="icon-wordmark.png" alt="ICON"></h1>
+    </div>
     <div class="topbar-right">
       <div class="date-display" id="todayDate"></div>
-      <a href="history.html" class="btn btn-secondary">История</a>
+      <input type="date" id="viewDateInput" class="date-picker-input" title="Показать данные за день">
     </div>
   </header>
 
@@ -43,6 +57,7 @@
     <div class="panel-head">
       <h2>Наименования</h2>
       <div class="panel-head-actions">
+        <a href="history.html" class="btn btn-secondary">История</a>
         <button id="newMonthBtn" class="btn btn-secondary admin-only">Перейти к новому месяцу</button>
         <button id="toggleAddRow" class="btn btn-secondary admin-only">+ Добавить</button>
       </div>
@@ -100,6 +115,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

@@ -30,7 +30,24 @@ const METHOD_PHRASE = { 'Наличка': 'в наличке', 'Click': 'в Clic
 const fmt = (n) => Math.round(n || 0).toLocaleString('ru-RU');
 const fmtSigned = (n) => n > 0 ? `-${fmt(n)}` : '—';
 const todayStr = () => new Date().toISOString().slice(0, 10);
-const monthOf = (dateStr) => dateStr.slice(0, 7);
+
+// The date the whole page is currently showing. Defaults to today and only
+// ever changes via the date picker (initDatePicker) — never persisted, so a
+// reload always comes back to today.
+let viewDate = todayStr();
+function isViewingPast() { return viewDate !== todayStr(); }
+// Same confirmation code as the existing "Исправить «Отдали в этом месяце»"
+// admin tool (see the data-fix-month handler below). Editing a past day's
+// Было/Поступило/источники/категории goes through this so it can't happen
+// from an accidental click while just browsing history — asked fresh on
+// every attempt, not a session-wide unlock.
+function requirePastEditCode() {
+  if (!isViewingPast()) return true;
+  const code = prompt('Просмотр прошлой даты. Код подтверждения для правки:');
+  if (code === null) return false;
+  if (code !== '1223') { alert('Неверный код'); return false; }
+  return true;
+}
 
 // live "1 000 / 10 000 / 100 000" grouping as the user types into any
 // [data-amount] field, keeping the cursor in the right spot
@@ -277,7 +294,7 @@ function methodRemainder(method, date) {
 // The real commit (and the actual save) still only happens on Enter/blur —
 // this just stops the displayed totals from looking stale mid-edit.
 function liveBalanceValues(method) {
-  const date = todayStr();
+  const date = viewDate;
   const block = document.querySelector(`.method-block[data-method="${method}"]`);
   const wasInput = block && block.querySelector('[data-balance-was]');
   const incomeInput = block && block.querySelector('[data-balance-income]');
@@ -325,11 +342,16 @@ function paidTodayByName(name, date) {
     .filter(e => e.name.trim() === name.trim() && e.date === date && !e.deleted)
     .reduce((s, e) => s + e.amount, 0);
 }
-// how much a given debt-row name was paid this month, across all 3 methods
-// (this is why category entries can safely reset daily — history is preserved here)
-function paidThisMonthByName(name, month) {
+// How much a given debt-row name has been paid since the last "Новый
+// месяц" click, across all 3 methods, as of a given date. NOT bound to the
+// real calendar month — it used to reset itself the moment the calendar
+// rolled to a new month (even with nothing clicked), which is exactly the
+// "почему обнулилось само" complaint. The only thing that zeroes this now
+// is startNewMonth() soft-deleting the expenses; a plain calendar rollover
+// with no click leaves it exactly as it was.
+function paidThisMonthByName(name, asOfDate) {
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date.startsWith(month) && !e.deleted)
+    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && !e.deleted)
     .reduce((s, e) => s + e.amount, 0);
 }
 
@@ -373,9 +395,11 @@ function moveRow(id, toIndex) {
   rows.splice(Math.max(0, Math.min(toIndex, rows.length)), 0, item);
   save(STORAGE.rows, rows);
 }
-function addExpense(method, name, amount) {
+// date defaults to today for the fix-month/seed callers, which never pass
+// one; the category-add form (renderMethods) passes the day being viewed.
+function addExpense(method, name, amount, date = todayStr()) {
   const list = getExpenses();
-  list.push({ id: uid(), method, name, amount, checked: false, date: todayStr(), ts: Date.now(), comment: '', deleted: false });
+  list.push({ id: uid(), method, name, amount, checked: false, date, ts: Date.now(), comment: '', deleted: false });
   save(STORAGE.expenses, list);
 }
 function toggleExpense(id) {
@@ -454,7 +478,7 @@ function closeAllAutocomplete() {
 // ---------- rendering: method blocks ----------
 
 function renderMethods() {
-  const date = todayStr();
+  const date = viewDate;
   const container = document.getElementById('methodsRow');
 
   container.innerHTML = METHODS.map(method => {
@@ -548,14 +572,19 @@ function renderMethods() {
       const name = form.querySelector('[data-expense-name]').value.trim();
       const amount = parseAmount(form.querySelector('[data-expense-amount]'));
       if (!amount || amount <= 0) return;
-      addExpense(method, name, amount);
+      if (!requirePastEditCode()) return;
+      addExpense(method, name, amount, date);
       closeAllAutocomplete();
       renderAll();
     });
   });
 
   container.querySelectorAll('[data-check-expense]').forEach(btn => {
-    btn.addEventListener('click', () => { toggleExpense(btn.dataset.checkExpense); renderAll(); });
+    btn.addEventListener('click', () => {
+      if (!requirePastEditCode()) return;
+      toggleExpense(btn.dataset.checkExpense);
+      renderAll();
+    });
   });
 
   container.querySelectorAll('[data-del-expense]').forEach(btn => {
@@ -563,6 +592,7 @@ function renderMethods() {
       const id = btn.dataset.delExpense;
       const item = getExpenses().find(e => e.id === id);
       if (!item || !confirm(`Удалить платёж «${item.name || 'без названия'}» (${fmt(item.amount)})?`)) return;
+      if (!requirePastEditCode()) return;
       deleteExpense(id);
       renderAll();
     });
@@ -573,10 +603,12 @@ function renderMethods() {
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
+      if (!requirePastEditCode()) { renderAll(); return; }
       setWas(input.dataset.balanceWas, date, parseAmount(input));
       renderAll();
     });
     input.addEventListener('change', () => {
+      if (!requirePastEditCode()) { renderAll(); return; }
       setWas(input.dataset.balanceWas, date, parseAmount(input));
       renderAll();
     });
@@ -586,10 +618,12 @@ function renderMethods() {
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
+      if (!requirePastEditCode()) { renderAll(); return; }
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
       renderAll();
     });
     input.addEventListener('change', () => {
+      if (!requirePastEditCode()) { renderAll(); return; }
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
       renderAll();
     });
@@ -616,6 +650,7 @@ function renderMethods() {
         alert('Укажите сумму больше нуля.');
         return;
       }
+      if (!requirePastEditCode()) return;
       addSource(method, date, label, amount);
       openSourceForm = null;
       renderAll();
@@ -627,6 +662,7 @@ function renderMethods() {
       const id = btn.dataset.delSource;
       const item = getBalanceEntry(method, date).sources.find(s => s.id === id);
       if (!item || !confirm(`Удалить источник «${item.label}» (${fmt(item.amount)})?`)) return;
+      if (!requirePastEditCode()) return;
       removeSource(method, date, id);
       renderAll();
     });
@@ -636,14 +672,17 @@ function renderMethods() {
 // ---------- rendering: main table ----------
 
 function renderRow(r) {
-  const date = todayStr();
-  const month = monthOf(date);
+  const date = viewDate;
   const today = paidTodayByName(r.name, date);
-  const monthPaid = paidThisMonthByName(r.name, month);
+  const monthPaid = paidThisMonthByName(r.name, date);
   const diff = r.due - monthPaid;
   const diffClass = diff === 0 ? 'diff-zero' : (diff > 0 ? 'diff-pos' : 'diff-neg');
+  // Row add/edit/delete/reorder are never day-scoped, so unlike the
+  // Было/Поступило/категории gate (requirePastEditCode) there is no code
+  // that unlocks these while browsing a past date — they're just hidden.
+  const canEditRows = state.isAdmin && !isViewingPast();
 
-  if (state.isAdmin && editingRowId === r.id) {
+  if (canEditRows && editingRowId === r.id) {
     return `
       <tr class="editing">
         <td colspan="8">
@@ -661,14 +700,14 @@ function renderRow(r) {
 
   return `
     <tr data-row-id="${r.id}">
-      <td class="drag-col">${state.isAdmin ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
+      <td class="drag-col">${canEditRows ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
       <td class="date-cell">${escapeHtml(r.payDate || '—')}</td>
       <td>${r.isDebt ? `<span class="debt-dot" title="Долг"></span>` : ''}${escapeHtml(r.name)}${r.comment ? `<span class="info-icon" data-view-comment="${r.id}" title="${escapeHtml(r.comment)}">i</span>` : ''}</td>
       <td class="num due-cell">${fmt(r.due)}</td>
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
-      <td class="actions-cell">${state.isAdmin ? `<button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>` : ''}</td>
+      <td class="actions-cell">${canEditRows ? `<button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>` : ''}</td>
     </tr>
   `;
 }
@@ -723,8 +762,7 @@ function renderRowMenu() {
   });
   menu.querySelector('[data-fix-month]').addEventListener('click', () => {
     openRowMenuId = null;
-    const m = monthOf(todayStr());
-    const current = paidThisMonthByName(row.name, m);
+    const current = paidThisMonthByName(row.name, todayStr());
     const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
     if (raw === null) { renderAll(); return; }
     const next = Number(String(raw).replace(/\D/g, ''));
@@ -746,8 +784,7 @@ function renderExpenseTable() {
   const rows = getRows();
   const tbody = document.getElementById('expenseTableBody');
   const tfoot = document.getElementById('expenseTableFoot');
-  const date = todayStr();
-  const month = monthOf(date);
+  const date = viewDate;
 
   tbody.innerHTML = rows.length
     ? rows.map(renderRow).join('')
@@ -755,7 +792,7 @@ function renderExpenseTable() {
 
   const due = rows.reduce((s, r) => s + r.due, 0);
   const today = rows.reduce((s, r) => s + paidTodayByName(r.name, date), 0);
-  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, month), 0);
+  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, date), 0);
   const diff = due - monthPaid;
   tfoot.innerHTML = rows.length ? `
     <tr>
@@ -855,7 +892,7 @@ function renderExpenseTable() {
 // ---------- KPIs ----------
 
 function renderKpis() {
-  const date = todayStr();
+  const date = viewDate;
   const totalIncome = METHODS.reduce((s, m) => s + methodNewIncome(m, date), 0);
   const totalSpent = METHODS.reduce((s, m) => s + categorySum(m, date), 0);
   const totalLeft = METHODS.reduce((s, m) => s + methodRemainder(m, date), 0);
@@ -1031,8 +1068,13 @@ function setupGlobalEvents() {
   const flushFocusedBalanceInput = () => {
     const el = document.activeElement;
     if (!el) return;
-    if (el.matches?.('[data-balance-was]')) setWas(el.dataset.balanceWas, todayStr(), parseAmount(el));
-    else if (el.matches?.('[data-balance-income]')) setIncome(el.dataset.balanceIncome, todayStr(), parseAmount(el));
+    // A confirm() prompt isn't reliable during unload, and silently writing
+    // a past-date edit into today's date would corrupt today's numbers —
+    // so an in-progress past-date edit just doesn't get the safety-net
+    // flush; the user has to actually commit it (Enter/blur) with the code.
+    if (isViewingPast()) return;
+    if (el.matches?.('[data-balance-was]')) setWas(el.dataset.balanceWas, viewDate, parseAmount(el));
+    else if (el.matches?.('[data-balance-income]')) setIncome(el.dataset.balanceIncome, viewDate, parseAmount(el));
   };
   window.addEventListener('beforeunload', flushFocusedBalanceInput);
   document.addEventListener('visibilitychange', () => {
@@ -1045,19 +1087,75 @@ function setDateDisplay() {
     new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// The date picked but not yet confirmed — window.confirm() fired from a
+// native <input type="date">'s change handler is unreliable (it can get
+// stuck behind/inside the browser's own date-picker popup and never
+// actually show), so this is a plain on-page confirm bar instead.
+let pendingViewDate = null;
+
+function renderViewDateConfirm() {
+  const bar = document.getElementById('viewDateConfirm');
+  const text = document.getElementById('viewDateConfirmText');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !pendingViewDate);
+  if (pendingViewDate) {
+    const [y, m, d] = pendingViewDate.split('-');
+    text.textContent = `Перейти к ${d}.${m}.${y}?`;
+  }
+}
+
+function initDatePicker() {
+  const input = document.getElementById('viewDateInput');
+  const todayBtn = document.getElementById('viewDateTodayBtn');
+  const confirmYes = document.getElementById('viewDateConfirmYes');
+  const confirmNo = document.getElementById('viewDateConfirmNo');
+  if (!input) return;
+  const today = todayStr();
+  input.min = addDays(today, -30);
+  input.max = today;
+  input.value = viewDate;
+  input.addEventListener('change', () => {
+    const picked = input.value || today;
+    pendingViewDate = picked === viewDate ? null : picked;
+    renderViewDateConfirm();
+  });
+  if (confirmYes) {
+    confirmYes.addEventListener('click', () => {
+      if (!pendingViewDate) return;
+      viewDate = pendingViewDate;
+      pendingViewDate = null;
+      renderAll();
+    });
+  }
+  if (confirmNo) {
+    confirmNo.addEventListener('click', () => {
+      pendingViewDate = null;
+      input.value = viewDate; // revert — the picker shouldn't show a date that wasn't applied
+      renderViewDateConfirm();
+    });
+  }
+  if (todayBtn) {
+    todayBtn.addEventListener('click', () => {
+      pendingViewDate = null;
+      viewDate = today;
+      input.value = today;
+      renderAll();
+    });
+  }
+}
+
 function renderDebtSummary() {
   const panel = document.getElementById('debtSummaryPanel');
   const rows = getRows().filter(r => r.isDebt);
   const tbody = document.getElementById('debtSummaryBody');
   const tfoot = document.getElementById('debtSummaryFoot');
-  const month = monthOf(todayStr());
 
   panel.classList.toggle('hidden', rows.length === 0);
   tbody.innerHTML = '';
   if (!rows.length) { tfoot.innerHTML = ''; return; }
 
   const due = rows.reduce((s, r) => s + r.due, 0);
-  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, month), 0);
+  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, viewDate), 0);
   const left = due - monthPaid;
   tfoot.innerHTML = `
     <tr>
@@ -1069,8 +1167,32 @@ function renderDebtSummary() {
   `;
 }
 
+function renderViewDateBanner() {
+  const banner = document.getElementById('viewDateBanner');
+  const text = document.getElementById('viewDateBannerText');
+  if (!banner) return;
+  banner.classList.toggle('hidden', !isViewingPast());
+  if (isViewingPast()) {
+    const [y, m, d] = viewDate.split('-');
+    text.textContent = `Вы смотрите данные за ${d}.${m}.${y}, не за сегодня. Чтобы вернуться — нажмите «Сегодня».`;
+  }
+}
+
+function updateStaticAdminLocks() {
+  const past = isViewingPast();
+  const newMonthBtn = document.getElementById('newMonthBtn');
+  const toggleAddRow = document.getElementById('toggleAddRow');
+  const newRowForm = document.getElementById('newRowForm');
+  if (newMonthBtn) newMonthBtn.disabled = past;
+  if (toggleAddRow) toggleAddRow.disabled = past;
+  if (newRowForm && past) newRowForm.classList.add('hidden');
+}
+
 function renderAll() {
   balanceEntryCache.clear();
+  renderViewDateBanner();
+  renderViewDateConfirm();
+  updateStaticAdminLocks();
   renderMethods();
   renderExpenseTable();
   renderDebtSummary();
@@ -1285,7 +1407,7 @@ function enterApp(authUid, isAdmin) {
     document.getElementById('authGate').classList.add('hidden');
     const app = document.getElementById('app');
     if (app) app.classList.remove('hidden');
-    if (document.getElementById('methodsRow')) { setDateDisplay(); setupGlobalEvents(); }
+    if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); setupGlobalEvents(); }
   });
 }
 
