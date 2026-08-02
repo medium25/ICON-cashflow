@@ -1095,7 +1095,14 @@ function initDatePicker() {
   input.max = today;
   input.value = viewDate;
   input.addEventListener('change', () => {
-    viewDate = input.value || today;
+    const picked = input.value || today;
+    if (picked === viewDate) return;
+    const [y, m, d] = picked.split('-');
+    if (!confirm(`Перейти к ${d}.${m}.${y}?`)) {
+      input.value = viewDate; // revert — the picker shouldn't show a date that wasn't applied
+      return;
+    }
+    viewDate = picked;
     renderAll();
   });
   if (todayBtn) {
@@ -1138,7 +1145,7 @@ function renderViewDateBanner() {
   banner.classList.toggle('hidden', !isViewingPast());
   if (isViewingPast()) {
     const [y, m, d] = viewDate.split('-');
-    text.textContent = `Просмотр: ${d}.${m}.${y} — только просмотр`;
+    text.textContent = `Вы смотрите данные за ${d}.${m}.${y}, не за сегодня. Чтобы вернуться — нажмите «Сегодня».`;
   }
 }
 
