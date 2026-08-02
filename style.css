@@ -103,7 +103,7 @@ body::before {
   margin-bottom: 28px;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand-mark { width: 32px; height: 32px; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.brand-mark { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
 .topbar h1 {
   font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
   font-size: 28px;
