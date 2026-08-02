@@ -1060,6 +1060,10 @@ body::before {
   font-size: 14px;
   font-weight: 600;
 }
+/* Same specificity as the generic .hidden rule, but declared later isn't
+   reliable — pin it explicitly so this element's own display:flex never
+   wins the cascade over being hidden. */
+.view-date-banner.hidden { display: none; }
 
 .date-picker-input {
   font-family: inherit;
