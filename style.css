@@ -104,7 +104,7 @@ body::before {
 }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
-.topbar h1.brand-wordmark { margin: 0; line-height: 0; }
+.topbar h1.brand-wordmark { display: flex; align-items: center; gap: 10px; margin: 0; }
 .brand-wordmark img { height: 26px; width: auto; display: block; }
 .date-display { color: var(--text-muted); font-size: 14px; font-weight: 400; }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
