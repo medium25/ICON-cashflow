@@ -662,8 +662,12 @@ function renderRow(r) {
   const monthPaid = paidThisMonthByName(r.name, month);
   const diff = r.due - monthPaid;
   const diffClass = diff === 0 ? 'diff-zero' : (diff > 0 ? 'diff-pos' : 'diff-neg');
+  // Row add/edit/delete/reorder are never day-scoped, so unlike the
+  // Было/Поступило/категории gate (requirePastEditCode) there is no code
+  // that unlocks these while browsing a past date — they're just hidden.
+  const canEditRows = state.isAdmin && !isViewingPast();
 
-  if (state.isAdmin && editingRowId === r.id) {
+  if (canEditRows && editingRowId === r.id) {
     return `
       <tr class="editing">
         <td colspan="8">
@@ -681,14 +685,14 @@ function renderRow(r) {
 
   return `
     <tr data-row-id="${r.id}">
-      <td class="drag-col">${state.isAdmin ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
+      <td class="drag-col">${canEditRows ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
       <td class="date-cell">${escapeHtml(r.payDate || '—')}</td>
       <td>${r.isDebt ? `<span class="debt-dot" title="Долг"></span>` : ''}${escapeHtml(r.name)}${r.comment ? `<span class="info-icon" data-view-comment="${r.id}" title="${escapeHtml(r.comment)}">i</span>` : ''}</td>
       <td class="num due-cell">${fmt(r.due)}</td>
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
-      <td class="actions-cell">${state.isAdmin ? `<button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>` : ''}</td>
+      <td class="actions-cell">${canEditRows ? `<button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>` : ''}</td>
     </tr>
   `;
 }
@@ -1126,9 +1130,20 @@ function renderViewDateBanner() {
   }
 }
 
+function updateStaticAdminLocks() {
+  const past = isViewingPast();
+  const newMonthBtn = document.getElementById('newMonthBtn');
+  const toggleAddRow = document.getElementById('toggleAddRow');
+  const newRowForm = document.getElementById('newRowForm');
+  if (newMonthBtn) newMonthBtn.disabled = past;
+  if (toggleAddRow) toggleAddRow.disabled = past;
+  if (newRowForm && past) newRowForm.classList.add('hidden');
+}
+
 function renderAll() {
   balanceEntryCache.clear();
   renderViewDateBanner();
+  updateStaticAdminLocks();
   renderMethods();
   renderExpenseTable();
   renderDebtSummary();

@@ -1070,3 +1070,10 @@ body::before {
   background: var(--surface);
   color: var(--text);
 }
+
+.btn:disabled,
+.btn:disabled:hover {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
