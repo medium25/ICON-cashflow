@@ -1086,9 +1086,28 @@ function setDateDisplay() {
     new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// The date picked but not yet confirmed — window.confirm() fired from a
+// native <input type="date">'s change handler is unreliable (it can get
+// stuck behind/inside the browser's own date-picker popup and never
+// actually show), so this is a plain on-page confirm bar instead.
+let pendingViewDate = null;
+
+function renderViewDateConfirm() {
+  const bar = document.getElementById('viewDateConfirm');
+  const text = document.getElementById('viewDateConfirmText');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !pendingViewDate);
+  if (pendingViewDate) {
+    const [y, m, d] = pendingViewDate.split('-');
+    text.textContent = `Перейти к ${d}.${m}.${y}?`;
+  }
+}
+
 function initDatePicker() {
   const input = document.getElementById('viewDateInput');
   const todayBtn = document.getElementById('viewDateTodayBtn');
+  const confirmYes = document.getElementById('viewDateConfirmYes');
+  const confirmNo = document.getElementById('viewDateConfirmNo');
   if (!input) return;
   const today = todayStr();
   input.min = addDays(today, -30);
@@ -1096,17 +1115,27 @@ function initDatePicker() {
   input.value = viewDate;
   input.addEventListener('change', () => {
     const picked = input.value || today;
-    if (picked === viewDate) return;
-    const [y, m, d] = picked.split('-');
-    if (!confirm(`Перейти к ${d}.${m}.${y}?`)) {
-      input.value = viewDate; // revert — the picker shouldn't show a date that wasn't applied
-      return;
-    }
-    viewDate = picked;
-    renderAll();
+    pendingViewDate = picked === viewDate ? null : picked;
+    renderViewDateConfirm();
   });
+  if (confirmYes) {
+    confirmYes.addEventListener('click', () => {
+      if (!pendingViewDate) return;
+      viewDate = pendingViewDate;
+      pendingViewDate = null;
+      renderAll();
+    });
+  }
+  if (confirmNo) {
+    confirmNo.addEventListener('click', () => {
+      pendingViewDate = null;
+      input.value = viewDate; // revert — the picker shouldn't show a date that wasn't applied
+      renderViewDateConfirm();
+    });
+  }
   if (todayBtn) {
     todayBtn.addEventListener('click', () => {
+      pendingViewDate = null;
       viewDate = today;
       input.value = today;
       renderAll();
@@ -1162,6 +1191,7 @@ function updateStaticAdminLocks() {
 function renderAll() {
   balanceEntryCache.clear();
   renderViewDateBanner();
+  renderViewDateConfirm();
   updateStaticAdminLocks();
   renderMethods();
   renderExpenseTable();

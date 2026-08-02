@@ -1065,6 +1065,22 @@ body::before {
    wins the cascade over being hidden. */
 .view-date-banner.hidden { display: none; }
 
+.view-date-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.view-date-confirm.hidden { display: none; }
+
 .date-picker-input {
   font-family: inherit;
   font-size: 14px;
