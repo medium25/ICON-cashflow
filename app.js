@@ -295,7 +295,7 @@ function methodRemainder(method, date) {
 // The real commit (and the actual save) still only happens on Enter/blur —
 // this just stops the displayed totals from looking stale mid-edit.
 function liveBalanceValues(method) {
-  const date = todayStr();
+  const date = viewDate;
   const block = document.querySelector(`.method-block[data-method="${method}"]`);
   const wasInput = block && block.querySelector('[data-balance-was]');
   const incomeInput = block && block.querySelector('[data-balance-income]');
@@ -391,9 +391,11 @@ function moveRow(id, toIndex) {
   rows.splice(Math.max(0, Math.min(toIndex, rows.length)), 0, item);
   save(STORAGE.rows, rows);
 }
-function addExpense(method, name, amount) {
+// date defaults to today for the fix-month/seed callers, which never pass
+// one; the category-add form (renderMethods) passes the day being viewed.
+function addExpense(method, name, amount, date = todayStr()) {
   const list = getExpenses();
-  list.push({ id: uid(), method, name, amount, checked: false, date: todayStr(), ts: Date.now(), comment: '', deleted: false });
+  list.push({ id: uid(), method, name, amount, checked: false, date, ts: Date.now(), comment: '', deleted: false });
   save(STORAGE.expenses, list);
 }
 function toggleExpense(id) {
@@ -472,7 +474,7 @@ function closeAllAutocomplete() {
 // ---------- rendering: method blocks ----------
 
 function renderMethods() {
-  const date = todayStr();
+  const date = viewDate;
   const container = document.getElementById('methodsRow');
 
   container.innerHTML = METHODS.map(method => {
@@ -566,7 +568,7 @@ function renderMethods() {
       const name = form.querySelector('[data-expense-name]').value.trim();
       const amount = parseAmount(form.querySelector('[data-expense-amount]'));
       if (!amount || amount <= 0) return;
-      addExpense(method, name, amount);
+      addExpense(method, name, amount, date);
       closeAllAutocomplete();
       renderAll();
     });
@@ -654,7 +656,7 @@ function renderMethods() {
 // ---------- rendering: main table ----------
 
 function renderRow(r) {
-  const date = todayStr();
+  const date = viewDate;
   const month = monthOf(date);
   const today = paidTodayByName(r.name, date);
   const monthPaid = paidThisMonthByName(r.name, month);
@@ -764,7 +766,7 @@ function renderExpenseTable() {
   const rows = getRows();
   const tbody = document.getElementById('expenseTableBody');
   const tfoot = document.getElementById('expenseTableFoot');
-  const date = todayStr();
+  const date = viewDate;
   const month = monthOf(date);
 
   tbody.innerHTML = rows.length
@@ -873,7 +875,7 @@ function renderExpenseTable() {
 // ---------- KPIs ----------
 
 function renderKpis() {
-  const date = todayStr();
+  const date = viewDate;
   const totalIncome = METHODS.reduce((s, m) => s + methodNewIncome(m, date), 0);
   const totalSpent = METHODS.reduce((s, m) => s + categorySum(m, date), 0);
   const totalLeft = METHODS.reduce((s, m) => s + methodRemainder(m, date), 0);
@@ -1049,8 +1051,13 @@ function setupGlobalEvents() {
   const flushFocusedBalanceInput = () => {
     const el = document.activeElement;
     if (!el) return;
-    if (el.matches?.('[data-balance-was]')) setWas(el.dataset.balanceWas, todayStr(), parseAmount(el));
-    else if (el.matches?.('[data-balance-income]')) setIncome(el.dataset.balanceIncome, todayStr(), parseAmount(el));
+    // A confirm() prompt isn't reliable during unload, and silently writing
+    // a past-date edit into today's date would corrupt today's numbers —
+    // so an in-progress past-date edit just doesn't get the safety-net
+    // flush; the user has to actually commit it (Enter/blur) with the code.
+    if (isViewingPast()) return;
+    if (el.matches?.('[data-balance-was]')) setWas(el.dataset.balanceWas, viewDate, parseAmount(el));
+    else if (el.matches?.('[data-balance-income]')) setIncome(el.dataset.balanceIncome, viewDate, parseAmount(el));
   };
   window.addEventListener('beforeunload', flushFocusedBalanceInput);
   document.addEventListener('visibilitychange', () => {
@@ -1089,7 +1096,7 @@ function renderDebtSummary() {
   const rows = getRows().filter(r => r.isDebt);
   const tbody = document.getElementById('debtSummaryBody');
   const tfoot = document.getElementById('debtSummaryFoot');
-  const month = monthOf(todayStr());
+  const month = monthOf(viewDate);
 
   panel.classList.toggle('hidden', rows.length === 0);
   tbody.innerHTML = '';
