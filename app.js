@@ -30,6 +30,17 @@ const METHOD_PHRASE = { 'Наличка': 'в наличке', 'Click': 'в Clic
 const fmt = (n) => Math.round(n || 0).toLocaleString('ru-RU');
 const fmtSigned = (n) => n > 0 ? `-${fmt(n)}` : '—';
 const todayStr = () => new Date().toISOString().slice(0, 10);
+const tsDateStr = (ts) => new Date(ts).toISOString().slice(0, 10);
+
+// A soft-deleted record should only vanish from sums for the day it was
+// deleted on (and any day after) — not from days being viewed further back
+// in history. Without this, deleting a mis-entered expense today silently
+// rewrote "Отдали в этом месяце" for every past day that already counted it,
+// which is exactly the "почему прошлое изменилось" complaint.
+function activeAsOf(record, asOfDate) {
+  if (!record.deleted) return true;
+  return !record.deletedAt || tsDateStr(record.deletedAt) > asOfDate;
+}
 
 // The date the whole page is currently showing. Defaults to today and only
 // ever changes via the date picker (initDatePicker) — never persisted, so a
@@ -177,7 +188,7 @@ function hasEarlierActivity(method, date) {
   const prefix = `${method}_`;
   const hasBalanceEntry = Object.keys(balances).some(k => k.startsWith(prefix) && k.slice(prefix.length) < date);
   if (hasBalanceEntry) return true;
-  return getExpenses().some(e => e.method === method && e.date < date && !e.deleted);
+  return getExpenses().some(e => e.method === method && e.date < date && activeAsOf(e, date));
 }
 
 // getBalanceEntry recurses through every day back to the last saved entry,
@@ -260,6 +271,11 @@ function removeSource(method, date, id) {
   const s = entry.sources.find(x => x.id === id);
   if (s) { s.deleted = true; s.deletedAt = Date.now(); saveBalanceEntry(method, date, entry); }
 }
+function restoreSource(method, date, id) {
+  const entry = getBalanceEntry(method, date);
+  const s = entry.sources.find(x => x.id === id);
+  if (s) { s.deleted = false; s.deletedAt = null; saveBalanceEntry(method, date, entry); }
+}
 function setSourceComment(method, date, id, comment) {
   const entry = getBalanceEntry(method, date);
   const s = entry.sources.find(x => x.id === id);
@@ -269,13 +285,13 @@ function setSourceComment(method, date, id, comment) {
 // ---------- calculations ----------
 
 function expensesFor(method, date) {
-  return getExpenses().filter(e => e.method === method && e.date === date && !e.deleted);
+  return getExpenses().filter(e => e.method === method && e.date === date && activeAsOf(e, date));
 }
 function categorySum(method, date) {
   return expensesFor(method, date).reduce((s, e) => s + e.amount, 0);
 }
 function sourcesSum(method, date) {
-  return getBalanceEntry(method, date).sources.filter(s => !s.deleted).reduce((s, x) => s + x.amount, 0);
+  return getBalanceEntry(method, date).sources.filter(s => activeAsOf(s, date)).reduce((s, x) => s + x.amount, 0);
 }
 function methodNewIncome(method, date) {
   const entry = getBalanceEntry(method, date);
@@ -339,7 +355,7 @@ function updateLiveKpis() {
 // how much a given debt-row name was paid today, across all 3 methods
 function paidTodayByName(name, date) {
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date === date && !e.deleted)
+    .filter(e => e.name.trim() === name.trim() && e.date === date && activeAsOf(e, date))
     .reduce((s, e) => s + e.amount, 0);
 }
 // How much a given debt-row name has been paid since the last "Новый
@@ -351,7 +367,7 @@ function paidTodayByName(name, date) {
 // with no click leaves it exactly as it was.
 function paidThisMonthByName(name, asOfDate) {
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && !e.deleted)
+    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && activeAsOf(e, asOfDate))
     .reduce((s, e) => s + e.amount, 0);
 }
 
@@ -412,6 +428,11 @@ function deleteExpense(id) {
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.deleted = true; e.deletedAt = Date.now(); save(STORAGE.expenses, list); }
+}
+function restoreExpense(id) {
+  const list = getExpenses();
+  const e = list.find(x => x.id === id);
+  if (e) { e.deleted = false; e.deletedAt = null; save(STORAGE.expenses, list); }
 }
 function setExpenseComment(id, comment) {
   const list = getExpenses();
@@ -922,9 +943,9 @@ function collectAllTransactions() {
     const entry = balances[key];
     if (entry.was) items.push({ kind: 'income', method, date, label: 'Было', amount: entry.was, ts: entry.wasTs });
     if (entry.income) items.push({ kind: 'income', method, date, label: 'Поступило', amount: entry.income, ts: entry.incomeTs });
-    (entry.sources || []).filter(s => !s.deleted).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts }));
+    (entry.sources || []).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts, deleted: s.deleted, sourceId: s.id }));
   });
-  getExpenses().filter(e => !e.deleted).forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts }));
+  getExpenses().forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts, deleted: e.deleted, expenseId: e.id }));
   return items;
 }
 
@@ -966,17 +987,26 @@ function renderHistoryPage() {
   container.innerHTML = dates.map(date => {
     const dayItems = byDate[date].slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
     const cards = dayItems.map(it => `
-      <div class="history-card">
+      <div class="history-card ${it.deleted ? 'deleted' : ''}">
         <div class="history-card-top">
           <span class="history-method">${it.kind === 'income' ? 'Доход' : 'Расход'} ${escapeHtml(it.method)}</span>
           <span class="history-name">${escapeHtml(it.label || '—')}</span>
           <span class="history-amount ${it.kind === 'income' ? 'amount-pos' : 'amount-neg'}">${it.kind === 'income' ? '+' : '-'}${fmt(it.amount)}</span>
+          ${it.deleted && state.isAdmin ? `<button type="button" class="btn-icon history-restore" title="Восстановить" data-restore-expense="${it.expenseId || ''}" data-restore-source="${it.sourceId || ''}" data-restore-method="${it.method}" data-restore-date="${it.date}">↺</button>` : ''}
         </div>
-        <div class="history-meta">${timeLabel(it.ts)}</div>
+        <div class="history-meta">${timeLabel(it.ts)}${it.deleted ? ' · удалено' : ''}</div>
       </div>
     `).join('');
     return `<div class="history-day"><div class="history-day-label">${dateLabel(date)}</div>${cards}</div>`;
   }).join('');
+
+  container.querySelectorAll('[data-restore-expense], [data-restore-source]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.restoreExpense) restoreExpense(btn.dataset.restoreExpense);
+      else restoreSource(btn.dataset.restoreMethod, btn.dataset.restoreDate, btn.dataset.restoreSource);
+      renderHistoryPage();
+    });
+  });
 }
 
 // ---------- utils ----------

@@ -221,6 +221,7 @@ body::before {
 .history-amount.amount-neg { color: var(--red); }
 .history-card.deleted .history-amount { color: var(--text-muted); text-decoration: line-through; }
 .history-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.history-restore { flex-shrink: 0; width: 28px; height: 28px; font-size: 15px; }
 .history-deleted-tag { color: var(--red); font-weight: 650; margin-left: 6px; }
 .history-comment {
   width: 100%;
