@@ -9,6 +9,15 @@
    - Everything else (Сумма, Остаток, KPIs, Отдали Сегодня/в этом месяце, Разница)
      is calculated automatically. No localStorage seed data. */
 
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+db.settings({ experimentalAutoDetectLongPolling: true });
+
+// state.isAdmin gates every mutating listener/render affordance — only the
+// admin can write; everyone else gets the same shared data read-only.
+let state = { isAdmin: false, currentUser: null };
+
 const STORAGE = {
   rows: 'cf_rows',           // {id, name, due}
   expenses: 'cf_expenses',   // {id, method, name, amount, checked, date, ts, comment, deleted, deletedAt}
@@ -22,6 +31,24 @@ const fmt = (n) => Math.round(n || 0).toLocaleString('ru-RU');
 const fmtSigned = (n) => n > 0 ? `-${fmt(n)}` : '—';
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const monthOf = (dateStr) => dateStr.slice(0, 7);
+
+// The date the whole page is currently showing. Defaults to today and only
+// ever changes via the date picker (initDatePicker) — never persisted, so a
+// reload always comes back to today.
+let viewDate = todayStr();
+function isViewingPast() { return viewDate !== todayStr(); }
+// Same confirmation code as the existing "Исправить «Отдали в этом месяце»"
+// admin tool (see the data-fix-month handler below). Editing a past day's
+// Было/Поступило/источники/категории goes through this so it can't happen
+// from an accidental click while just browsing history — asked fresh on
+// every attempt, not a session-wide unlock.
+function requirePastEditCode() {
+  if (!isViewingPast()) return true;
+  const code = prompt('Просмотр прошлой даты. Код подтверждения для правки:');
+  if (code === null) return false;
+  if (code !== '1223') { alert('Неверный код'); return false; }
+  return true;
+}
 
 // live "1 000 / 10 000 / 100 000" grouping as the user types into any
 // [data-amount] field, keeping the cursor in the right spot
@@ -51,28 +78,164 @@ function load(key, fallback) {
   const raw = localStorage.getItem(key);
   return raw ? JSON.parse(raw) : fallback;
 }
-function save(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+
+// Shared data now lives in Firestore (collection "cashflow", one doc per
+// dataset) so every registered user sees the same live numbers instead of
+// their own empty per-browser localStorage. CACHE mirrors the 3 datasets in
+// memory, kept in sync by onSnapshot listeners (see attachSnapshotListeners),
+// so every existing getRows()/getExpenses()/getBalances() call site and every
+// derived-computation helper below keeps working completely unchanged.
+const CACHE = { rows: [], expenses: [], balances: {} };
+const STORAGE_TO_CACHE_KEY = { [STORAGE.rows]: 'rows', [STORAGE.expenses]: 'expenses', [STORAGE.balances]: 'balances' };
+
+// Guards against the failure mode where a mutation fires before the initial
+// onSnapshot data has arrived: CACHE would still be empty, and since save()
+// does a full .set() (not a merge), that would wipe the entire shared
+// document down to just the one new item. snapshotsLoaded is flipped true
+// per-doc the first time attachSnapshotListeners() hears back from Firestore;
+// enterApp() also waits on it before wiring up any mutating UI, so this is
+// a backstop for anything that could still slip through.
+const snapshotsLoaded = { rows: false, expenses: false, balances: false };
+function allDataLoaded() {
+  return snapshotsLoaded.rows && snapshotsLoaded.expenses && snapshotsLoaded.balances;
 }
 
-function getRows() { return load(STORAGE.rows, []); }
-function getExpenses() { return load(STORAGE.expenses, []); }
-function getBalances() { return load(STORAGE.balances, {}); }
+function countOf(value) {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === 'object') return Object.keys(value).length;
+  return 0;
+}
 
-function getBalanceEntry(method, date) {
-  const entry = getBalances()[`${method}_${date}`];
-  if (entry) return { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [], wasTs: entry.wasTs, incomeTs: entry.incomeTs };
-  // no record yet for this day — carry yesterday's Остаток into "Было", everything else starts at 0
+// A save that drops more than half the records (and more than a handful
+// outright) is very unlikely to be one intentional action — single
+// deletes only ever remove one item at a time. Catches any future bug of
+// this shape, not just the specific race this file already guards against.
+function isSuspiciousShrink(previousValue, nextValue) {
+  const before = countOf(previousValue), after = countOf(nextValue);
+  return before >= 5 && after < before - 3 && after < before * 0.5;
+}
+
+// Best-effort "one step back" safety net: stash whatever was live just
+// before an overwrite into a separate doc. Fire-and-forget — never blocks
+// or delays the real save, so a backup failure can't break normal use.
+function backupPreviousValue(cacheKey, previousValue) {
+  // Firestore rejects `undefined` field values outright (e.g. a balance
+  // entry whose wasTs/incomeTs was never set) — round-tripping through
+  // JSON drops those keys instead of letting the whole backup write reject.
+  const sanitized = JSON.parse(JSON.stringify(previousValue));
+  db.collection('cashflow_backups').doc(cacheKey)
+    .set({ data: sanitized, ts: Date.now() })
+    .catch((err) => console.error('Backup failed', err));
+}
+
+function save(key, value) {
+  const cacheKey = STORAGE_TO_CACHE_KEY[key];
+  if (!allDataLoaded()) {
+    console.error('Blocked save() before initial data finished loading — would have overwritten real data with a partial CACHE', cacheKey, value);
+    alert('Данные ещё загружаются. Подождите пару секунд и повторите.');
+    return;
+  }
+  const previous = CACHE[cacheKey];
+  if (isSuspiciousShrink(previous, value)) {
+    const before = countOf(previous), after = countOf(value);
+    if (!confirm(`Это действие уменьшит «${cacheKey}» с ${before} до ${after} записей — заметно больше, чем обычно удаляется за раз. Точно продолжить?`)) {
+      renderAll();
+      return;
+    }
+  }
+  backupPreviousValue(cacheKey, previous);
+  CACHE[cacheKey] = value;
+  db.collection('cashflow').doc(cacheKey).set({ data: value }).catch((err) => {
+    console.error('Save failed', err);
+    alert('Не удалось сохранить: проверьте соединение.');
+  });
+  // save() is the one place every mutation passes through — rendering here
+  // (rather than trusting every caller to remember renderAll() afterward)
+  // is what actually keeps the on-screen totals in sync with what just got
+  // written, instead of only updating on the next unrelated re-render.
+  renderCurrentPage();
+}
+
+function getRows() { return CACHE.rows; }
+function getExpenses() { return CACHE.expenses; }
+function getBalances() { return CACHE.balances; }
+
+// Pure calendar-string arithmetic, all in UTC (both parse and format), so it
+// never shifts by a day depending on the browser's local timezone offset —
+// consistent with todayStr() elsewhere treating date strings as UTC days.
+function addDays(dateStr, delta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+
+// true if this method has any recorded activity (a saved balance entry or a
+// non-deleted expense) strictly before `date` — used to stop the day-by-day
+// carry-forward in getBalanceEntry once we're past the method's real history.
+function hasEarlierActivity(method, date) {
   const balances = getBalances();
   const prefix = `${method}_`;
-  const priorDates = Object.keys(balances).filter(k => k.startsWith(prefix) && k.slice(prefix.length) < date).map(k => k.slice(prefix.length));
-  const prevDate = priorDates.sort().pop();
-  return { was: prevDate ? methodRemainder(method, prevDate) : 0, income: 0, sources: [] };
+  const hasBalanceEntry = Object.keys(balances).some(k => k.startsWith(prefix) && k.slice(prefix.length) < date);
+  if (hasBalanceEntry) return true;
+  return getExpenses().some(e => e.method === method && e.date < date && !e.deleted);
+}
+
+// getBalanceEntry recurses through every day back to the last saved entry,
+// and methodTotal/methodNewIncome/sourcesSum each call it again for the same
+// (method, date) — without caching, that's 3 calls per recursion level, so a
+// gap of N days becomes 3^N calls (a multi-month gap between saved "Было"
+// entries — normal usage, since not every day gets touched — made this
+// effectively hang). Memoizing collapses it back to one computation per day.
+// Cleared at the top of renderAll() so every render still reflects current data.
+let balanceEntryCache = new Map();
+function getBalanceEntry(method, date) {
+  const cacheKey = `${method}_${date}`;
+  if (balanceEntryCache.has(cacheKey)) return balanceEntryCache.get(cacheKey);
+  const entry = getBalances()[cacheKey];
+  let result;
+  if (entry) {
+    result = { was: entry.was || 0, income: entry.income || 0, sources: entry.sources || [], wasTs: entry.wasTs, incomeTs: entry.incomeTs };
+  } else if (!hasEarlierActivity(method, date)) {
+    // No record yet for this day and nothing earlier — carry 0 into "Было".
+    result = { was: 0, income: 0, sources: [] };
+  } else {
+    // No record yet for this day — carry the PREVIOUS CALENDAR DAY's Остаток
+    // into "Было" (everything else starts at 0). Recurses one day at a time
+    // (rather than jumping to the nearest day that happens to have a saved
+    // balance entry), so a day nobody touched "Было"/"Поступило" still has
+    // its own expenses subtracted before the balance carries forward.
+    result = { was: methodRemainder(method, addDays(date, -1)), income: 0, sources: [] };
+  }
+  balanceEntryCache.set(cacheKey, result);
+  return result;
 }
 function saveBalanceEntry(method, date, entry) {
+  const key = `${method}_${date}`;
   const balances = getBalances();
-  balances[`${method}_${date}`] = entry;
-  save(STORAGE.balances, balances);
+  balances[key] = entry;
+  if (!allDataLoaded()) {
+    console.error('Blocked saveBalanceEntry() before initial data finished loading');
+    alert('Данные ещё загружаются. Подождите пару секунд и повторите.');
+    return;
+  }
+  // Targeted field update, not save()'s whole-document .set() — "Было"/
+  // "Поступило" get edited constantly, often by more than one admin at
+  // once. A full-document overwrite here means whichever admin's save
+  // resolves last wins and silently wipes out everyone else's concurrent
+  // edits to every *other* date/method too (this was actually happening —
+  // see the 2026-07-21 "изменения не сохраняются" investigation). A
+  // dot-path update() only touches this one method_date entry, so two
+  // admins editing different rows (or even the same row at different
+  // times) can't stomp on each other's writes anymore. Sanitized through
+  // JSON first — Firestore rejects explicit `undefined` fields the same
+  // way it does for save()'s backups.
+  const sanitized = JSON.parse(JSON.stringify(entry));
+  db.collection('cashflow').doc('balances').update({ [`data.${key}`]: sanitized }).catch((err) => {
+    console.error('Balance save failed', err);
+    alert('Не удалось сохранить: проверьте соединение.');
+  });
+  renderCurrentPage();
 }
 function setWas(method, date, was) {
   const entry = getBalanceEntry(method, date);
@@ -125,6 +288,53 @@ function methodTotal(method, date) {
 }
 function methodRemainder(method, date) {
   return methodTotal(method, date) - categorySum(method, date);
+}
+
+// Live preview only — updates "Сумма"/"Остаток"/the top KPI row as the
+// admin types into "Было"/"Поступило", without touching CACHE or Firestore.
+// The real commit (and the actual save) still only happens on Enter/blur —
+// this just stops the displayed totals from looking stale mid-edit.
+function liveBalanceValues(method) {
+  const date = todayStr();
+  const block = document.querySelector(`.method-block[data-method="${method}"]`);
+  const wasInput = block && block.querySelector('[data-balance-was]');
+  const incomeInput = block && block.querySelector('[data-balance-income]');
+  const entry = getBalanceEntry(method, date);
+  const was = wasInput ? parseAmount(wasInput) : entry.was;
+  const income = incomeInput ? parseAmount(incomeInput) : entry.income;
+  const srcSum = sourcesSum(method, date);
+  const total = was + income + srcSum;
+  const remainder = total - categorySum(method, date);
+  return { was, income, srcSum, total, remainder };
+}
+
+function updateLiveTotals(input) {
+  const method = input.dataset.balanceWas || input.dataset.balanceIncome;
+  if (!method) return;
+  const block = input.closest('.method-block');
+  if (!block) return;
+  const { total, remainder } = liveBalanceValues(method);
+  const sumEl = block.querySelector('.balance-row.sum span:nth-child(2)');
+  if (sumEl) sumEl.textContent = fmt(total);
+  const remainderEl = block.querySelector('.result-value .result-number');
+  if (remainderEl) remainderEl.textContent = fmt(remainder);
+  updateLiveKpis();
+}
+
+// KPI row aggregates ALL THREE methods, not just the one being edited — so
+// unlike updateLiveTotals (scoped to the input's own block) this re-reads
+// every method's current on-screen values each time any one of them changes.
+function updateLiveKpis() {
+  let totalIncome = 0, totalLeft = 0;
+  METHODS.forEach(method => {
+    const v = liveBalanceValues(method);
+    totalIncome += v.income + v.srcSum;
+    totalLeft += v.remainder;
+  });
+  const kpiIn = document.getElementById('kpiIn');
+  const kpiLeft = document.getElementById('kpiLeft');
+  if (kpiIn) kpiIn.textContent = fmt(totalIncome);
+  if (kpiLeft) kpiLeft.textContent = fmt(totalLeft);
 }
 
 // how much a given debt-row name was paid today, across all 3 methods
@@ -211,9 +421,26 @@ let openRowMenuId = null; // debt-row whose ⋯ actions menu is open
 
 // ---------- category name autocomplete popup ----------
 
+// Lives as a single element directly under <body>, never inside a
+// .method-col — those cards have backdrop-filter, which (like transform)
+// makes them the containing block for any position:fixed descendant. A menu
+// nested inside one would get positioned relative to the card instead of the
+// viewport, while the math below assumes viewport coordinates — that
+// mismatch is what sent the dropdown flying off to an unrelated card.
+let autocompleteMenuEl = null;
+let autocompleteTargetInput = null;
+function ensureAutocompleteMenu() {
+  if (!autocompleteMenuEl) {
+    autocompleteMenuEl = document.createElement('div');
+    autocompleteMenuEl.className = 'autocomplete-menu hidden';
+    document.body.appendChild(autocompleteMenuEl);
+  }
+  return autocompleteMenuEl;
+}
+
 function openAutocompleteFor(input) {
-  const wrap = input.closest('[data-autocomplete]');
-  const menu = wrap.querySelector('[data-autocomplete-menu]');
+  const menu = ensureAutocompleteMenu();
+  autocompleteTargetInput = input;
   const names = [...new Set(getRows().map(r => r.name).filter(Boolean))];
   const f = input.value.trim().toLowerCase();
   const filtered = f ? names.filter(n => n.toLowerCase().startsWith(f)) : names;
@@ -238,7 +465,8 @@ function openAutocompleteFor(input) {
   }
 }
 function closeAllAutocomplete() {
-  document.querySelectorAll('.autocomplete-menu').forEach(m => m.classList.add('hidden'));
+  if (autocompleteMenuEl) autocompleteMenuEl.classList.add('hidden');
+  autocompleteTargetInput = null;
 }
 
 // ---------- rendering: method blocks ----------
@@ -258,10 +486,12 @@ function renderMethods() {
     const rowsHtml = entries.length
       ? entries.map((e, i) => `
           <div class="cat-row ${e.checked ? 'checked' : ''}">
-            <button type="button" class="cat-index" data-check-expense="${e.id}" title="Отметить оплату">${e.checked ? '✓' : i + 1}</button>
+            ${state.isAdmin
+              ? `<button type="button" class="cat-index" data-check-expense="${e.id}" title="Отметить оплату">${e.checked ? '✓' : i + 1}</button>`
+              : `<span class="cat-index">${e.checked ? '✓' : i + 1}</span>`}
             <span class="cat-name">${escapeHtml(e.name || '—')}</span>
             <span class="cat-amount">${fmt(e.amount)}</span>
-            <button class="cat-del" data-del-expense="${e.id}" title="Удалить">✕</button>
+            ${state.isAdmin ? `<button class="cat-del" data-del-expense="${e.id}" title="Удалить">✕</button>` : ''}
           </div>
         `).join('')
       : `<div class="empty-hint">Пока нет записей</div>`;
@@ -270,7 +500,7 @@ function renderMethods() {
       <div class="balance-row source-row">
         <span class="balance-label">${escapeHtml(s.label)}</span>
         <span class="source-amount">${fmt(s.amount)}</span>
-        <button class="source-del" data-del-source="${s.id}" data-method="${method}" title="Удалить">✕</button>
+        ${state.isAdmin ? `<button class="source-del" data-del-source="${s.id}" data-method="${method}" title="Удалить">✕</button>` : ''}
       </div>
     `).join('');
 
@@ -281,36 +511,41 @@ function renderMethods() {
           <div class="balance-rows">
             <div class="balance-row">
               <span class="balance-label">Было</span>
-              <input type="text" inputmode="numeric" class="balance-input" data-balance-was="${method}" data-amount value="${bal.was ? fmt(bal.was) : ''}" placeholder="0">
+              ${state.isAdmin
+                ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-was="${method}" data-amount value="${bal.was ? fmt(bal.was) : ''}" placeholder="0">`
+                : `<span class="balance-input-static">${fmt(bal.was)}</span>`}
             </div>
             <div class="balance-row">
               <span class="balance-label">Поступило</span>
-              <input type="text" inputmode="numeric" class="balance-input" data-balance-income="${method}" data-amount value="${bal.income ? fmt(bal.income) : ''}" placeholder="0">
+              ${state.isAdmin
+                ? `<input type="text" inputmode="numeric" class="balance-input" data-balance-income="${method}" data-amount value="${bal.income ? fmt(bal.income) : ''}" placeholder="0">`
+                : `<span class="balance-input-static">${fmt(bal.income)}</span>`}
             </div>
+            ${state.isAdmin ? `
             <form class="source-add-row ${sourceFormOpen ? '' : 'hidden'}" data-source-form="${method}">
-              <input type="text" placeholder="Название источника" data-source-label required>
+              <input type="text" placeholder="Название источника (необязательно)" data-source-label>
               <input type="text" inputmode="numeric" placeholder="Сумма" data-source-amount data-amount required>
               <button type="submit" class="btn btn-primary">Добавить</button>
-            </form>
+            </form>` : ''}
             ${sourcesHtml}
           </div>
           <div class="balance-row sum">
             <span>Сумма</span>
             <span>${fmt(total)}</span>
-            <button type="button" class="btn-kebab" data-toggle-source="${method}" title="Добавить источник">⋯</button>
+            ${state.isAdmin ? `<button type="button" class="btn-kebab" data-toggle-source="${method}" title="Добавить источник">⋯</button>` : ''}
           </div>
         </div>
         <div class="method-col stripe-red">
           <div class="col-head">Расходы ${METHOD_PHRASE[method]}</div>
           <div class="cat-list">${rowsHtml}</div>
+          ${state.isAdmin ? `
           <form class="cat-add-row" data-expense-form="${method}">
             <div class="autocomplete" data-autocomplete>
               <input type="text" placeholder="Категория" data-expense-name autocomplete="off">
-              <div class="autocomplete-menu hidden" data-autocomplete-menu></div>
             </div>
             <input type="text" inputmode="numeric" placeholder="Сумма" data-expense-amount data-amount required>
             <button type="submit">+</button>
-          </form>
+          </form>` : ''}
           <div class="cat-sum-row"><span></span><span>Сумма</span><span>${fmt(catSum)}</span></div>
         </div>
         <div class="method-col stripe-blue">
@@ -353,6 +588,12 @@ function renderMethods() {
 
   container.querySelectorAll('[data-balance-was]').forEach(input => {
     input.addEventListener('focus', () => input.select());
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      setWas(input.dataset.balanceWas, date, parseAmount(input));
+      renderAll();
+    });
     input.addEventListener('change', () => {
       setWas(input.dataset.balanceWas, date, parseAmount(input));
       renderAll();
@@ -360,6 +601,12 @@ function renderMethods() {
   });
   container.querySelectorAll('[data-balance-income]').forEach(input => {
     input.addEventListener('focus', () => input.select());
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      setIncome(input.dataset.balanceIncome, date, parseAmount(input));
+      renderAll();
+    });
     input.addEventListener('change', () => {
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
       renderAll();
@@ -381,9 +628,12 @@ function renderMethods() {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const method = form.dataset.sourceForm;
-      const label = form.querySelector('[data-source-label]').value.trim();
+      const label = form.querySelector('[data-source-label]').value.trim() || 'Доход';
       const amount = parseAmount(form.querySelector('[data-source-amount]'));
-      if (!label || !amount || amount <= 0) return;
+      if (!amount || amount <= 0) {
+        alert('Укажите сумму больше нуля.');
+        return;
+      }
       addSource(method, date, label, amount);
       openSourceForm = null;
       renderAll();
@@ -411,7 +661,7 @@ function renderRow(r) {
   const diff = r.due - monthPaid;
   const diffClass = diff === 0 ? 'diff-zero' : (diff > 0 ? 'diff-pos' : 'diff-neg');
 
-  if (editingRowId === r.id) {
+  if (state.isAdmin && editingRowId === r.id) {
     return `
       <tr class="editing">
         <td colspan="8">
@@ -427,28 +677,87 @@ function renderRow(r) {
     `;
   }
 
-  const menuOpen = openRowMenuId === r.id;
   return `
     <tr data-row-id="${r.id}">
-      <td class="drag-col"><span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span></td>
+      <td class="drag-col">${state.isAdmin ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
       <td class="date-cell">${escapeHtml(r.payDate || '—')}</td>
       <td>${r.isDebt ? `<span class="debt-dot" title="Долг"></span>` : ''}${escapeHtml(r.name)}${r.comment ? `<span class="info-icon" data-view-comment="${r.id}" title="${escapeHtml(r.comment)}">i</span>` : ''}</td>
       <td class="num due-cell">${fmt(r.due)}</td>
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
-      <td class="actions-cell">
-        <button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>
-        <div class="row-menu ${menuOpen ? '' : 'hidden'}" data-row-menu="${r.id}">
-          <button data-edit-row="${r.id}">✎ Редактировать</button>
-          <button data-mark-debt="${r.id}">${r.isDebt ? '● Убрать пометку долга' : '● Пометить как долг'}</button>
-          <button data-comment-row="${r.id}">💬 Комментарий</button>
-          <button data-fix-month="${r.id}">🔧 Исправить «Отдали в этом месяце»</button>
-          <button data-del-row="${r.id}" class="danger">✕ Удалить</button>
-        </div>
-      </td>
+      <td class="actions-cell">${state.isAdmin ? `<button class="btn-icon" data-row-menu-toggle="${r.id}" title="Меню">⋯</button>` : ''}</td>
     </tr>
   `;
+}
+
+// Lives as a single element directly under <body>, for the same reason as
+// the autocomplete menu above: .panel (which wraps the debt table) has
+// backdrop-filter, so a position:fixed element nested inside it gets
+// positioned relative to the panel instead of the viewport — which is what
+// sent this menu somewhere else on screen instead of next to the ⋯ button.
+let rowMenuEl = null;
+function ensureRowMenuEl() {
+  if (!rowMenuEl) {
+    rowMenuEl = document.createElement('div');
+    rowMenuEl.className = 'row-menu hidden';
+    document.body.appendChild(rowMenuEl);
+  }
+  return rowMenuEl;
+}
+
+function renderRowMenu() {
+  const menu = ensureRowMenuEl();
+  if (!openRowMenuId) { menu.classList.add('hidden'); return; }
+  const row = getRows().find(r => r.id === openRowMenuId);
+  const toggleBtn = document.querySelector(`[data-row-menu-toggle="${openRowMenuId}"]`);
+  if (!row || !toggleBtn) { openRowMenuId = null; menu.classList.add('hidden'); return; }
+
+  menu.innerHTML = `
+    <button data-edit-row>✎ Редактировать</button>
+    <button data-mark-debt>${row.isDebt ? '● Убрать пометку долга' : '● Пометить как долг'}</button>
+    <button data-comment-row>💬 Комментарий</button>
+    <button data-fix-month>🔧 Исправить «Отдали в этом месяце»</button>
+    <button data-del-row class="danger">✕ Удалить</button>
+  `;
+  menu.classList.remove('hidden');
+
+  const rect = toggleBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${window.innerWidth - rect.right}px`;
+
+  menu.querySelector('[data-edit-row]').addEventListener('click', () => {
+    editingRowId = row.id; openRowMenuId = null; renderAll();
+  });
+  menu.querySelector('[data-mark-debt]').addEventListener('click', () => {
+    toggleRowDebt(row.id); openRowMenuId = null; renderAll();
+  });
+  menu.querySelector('[data-comment-row]').addEventListener('click', () => {
+    const next = prompt('Комментарий:', row.comment || '');
+    openRowMenuId = null;
+    if (next === null) { renderAll(); return; }
+    setRowComment(row.id, next.trim());
+    renderAll();
+  });
+  menu.querySelector('[data-fix-month]').addEventListener('click', () => {
+    openRowMenuId = null;
+    const m = monthOf(todayStr());
+    const current = paidThisMonthByName(row.name, m);
+    const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
+    if (raw === null) { renderAll(); return; }
+    const next = Number(String(raw).replace(/\D/g, ''));
+    const code = prompt('Код подтверждения:');
+    if (code !== '1223') { alert('Неверный код'); renderAll(); return; }
+    const delta = next - current;
+    if (delta !== 0) addExpense('Корректировка', row.name, delta);
+    renderAll();
+  });
+  menu.querySelector('[data-del-row]').addEventListener('click', () => {
+    openRowMenuId = null;
+    if (!confirm(`Удалить «${row.name}»?`)) { renderAll(); return; }
+    deleteRow(row.id);
+    renderAll();
+  });
 }
 
 function renderExpenseTable() {
@@ -479,18 +788,6 @@ function renderExpenseTable() {
     </tr>
   ` : '';
 
-  tbody.querySelectorAll('[data-edit-row]').forEach(btn => {
-    btn.addEventListener('click', () => { editingRowId = btn.dataset.editRow; openRowMenuId = null; renderAll(); });
-  });
-  tbody.querySelectorAll('[data-del-row]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const row = rows.find(r => r.id === btn.dataset.delRow);
-      openRowMenuId = null;
-      if (!row || !confirm(`Удалить «${row.name}»?`)) return;
-      deleteRow(btn.dataset.delRow);
-      renderAll();
-    });
-  });
   tbody.querySelectorAll('[data-cancel-edit]').forEach(btn => {
     btn.addEventListener('click', () => { editingRowId = null; renderAll(); });
   });
@@ -522,45 +819,12 @@ function renderExpenseTable() {
       if (row) alert(row.comment);
     });
   });
-  tbody.querySelectorAll('[data-mark-debt]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      toggleRowDebt(btn.dataset.markDebt);
-      openRowMenuId = null;
-      renderAll();
-    });
-  });
-  tbody.querySelectorAll('[data-fix-month]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      openRowMenuId = null;
-      const row = rows.find(r => r.id === btn.dataset.fixMonth);
-      const m = monthOf(todayStr());
-      const current = paidThisMonthByName(row.name, m);
-      const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
-      if (raw === null) { renderAll(); return; }
-      const next = Number(String(raw).replace(/\D/g, ''));
-      const code = prompt('Код подтверждения:');
-      if (code !== '1223') { alert('Неверный код'); renderAll(); return; }
-      const delta = next - current;
-      if (delta !== 0) addExpense('Корректировка', row.name, delta);
-      renderAll();
-    });
-  });
   tbody.querySelectorAll('[data-row-menu-toggle]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.dataset.rowMenuToggle;
-      const opening = openRowMenuId !== id;
-      // capture the button's position BEFORE renderAll() replaces the DOM —
-      // afterwards this button no longer exists, so its rect would read 0,0
-      const rect = btn.getBoundingClientRect();
-      openRowMenuId = opening ? id : null;
+      openRowMenuId = openRowMenuId === id ? null : id;
       renderAll();
-      if (opening) {
-        const menu = tbody.querySelector(`[data-row-menu="${id}"]`);
-        menu.style.position = 'fixed';
-        menu.style.top = `${rect.bottom + 4}px`;
-        menu.style.right = `${window.innerWidth - rect.right}px`;
-      }
     });
   });
 
@@ -707,6 +971,8 @@ function escapeHtml(str) {
 // ---------- events ----------
 
 function setupGlobalEvents() {
+  if (!state.isAdmin) return; // admin-only elements are removed from the DOM for everyone else
+
   const newRowForm = document.getElementById('newRowForm');
   const toggleBtn = document.getElementById('toggleAddRow');
   const cancelBtn = document.getElementById('cancelAddRow');
@@ -757,22 +1023,38 @@ function setupGlobalEvents() {
   methodsRow.addEventListener('keydown', (e) => {
     if (e.target.matches('[data-expense-name]') && e.key === 'Escape') closeAllAutocomplete();
   });
-  methodsRow.addEventListener('mousedown', (e) => {
+  document.addEventListener('mousedown', (e) => {
     const item = e.target.closest('.autocomplete-item');
-    if (!item) return;
+    if (!item || !autocompleteTargetInput) return;
     e.preventDefault();
-    const wrap = item.closest('[data-autocomplete]');
-    wrap.querySelector('[data-expense-name]').value = item.dataset.value;
+    autocompleteTargetInput.value = item.dataset.value;
     closeAllAutocomplete();
   });
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('[data-autocomplete]')) closeAllAutocomplete();
+    if (!e.target.closest('[data-autocomplete]') && !e.target.closest('.autocomplete-menu')) closeAllAutocomplete();
   });
 
   // live space-grouping for every amount field on the page, delegated so it
   // keeps working after any part of the page re-renders
   document.addEventListener('input', (e) => {
     if (e.target.matches('[data-amount]')) formatAmountInput(e.target);
+    if (e.target.matches('[data-balance-was], [data-balance-income]')) updateLiveTotals(e.target);
+  });
+
+  // "Было"/"Поступило" only commit on Enter or blur — the live preview
+  // above makes an in-progress edit look already saved, so someone who
+  // types a number and closes the tab (or switches apps) without
+  // Enter/clicking away never actually persists it. Flush whatever's
+  // focused right before the page actually goes away, as a safety net.
+  const flushFocusedBalanceInput = () => {
+    const el = document.activeElement;
+    if (!el) return;
+    if (el.matches?.('[data-balance-was]')) setWas(el.dataset.balanceWas, todayStr(), parseAmount(el));
+    else if (el.matches?.('[data-balance-income]')) setIncome(el.dataset.balanceIncome, todayStr(), parseAmount(el));
+  };
+  window.addEventListener('beforeunload', flushFocusedBalanceInput);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushFocusedBalanceInput();
   });
 }
 
@@ -781,10 +1063,70 @@ function setDateDisplay() {
     new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function initDatePicker() {
+  const input = document.getElementById('viewDateInput');
+  const todayBtn = document.getElementById('viewDateTodayBtn');
+  if (!input) return;
+  const today = todayStr();
+  input.min = addDays(today, -30);
+  input.max = today;
+  input.value = viewDate;
+  input.addEventListener('change', () => {
+    viewDate = input.value || today;
+    renderAll();
+  });
+  if (todayBtn) {
+    todayBtn.addEventListener('click', () => {
+      viewDate = today;
+      input.value = today;
+      renderAll();
+    });
+  }
+}
+
+function renderDebtSummary() {
+  const panel = document.getElementById('debtSummaryPanel');
+  const rows = getRows().filter(r => r.isDebt);
+  const tbody = document.getElementById('debtSummaryBody');
+  const tfoot = document.getElementById('debtSummaryFoot');
+  const month = monthOf(todayStr());
+
+  panel.classList.toggle('hidden', rows.length === 0);
+  tbody.innerHTML = '';
+  if (!rows.length) { tfoot.innerHTML = ''; return; }
+
+  const due = rows.reduce((s, r) => s + r.due, 0);
+  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, month), 0);
+  const left = due - monthPaid;
+  tfoot.innerHTML = `
+    <tr>
+      <td>Итого</td>
+      <td class="num">${fmt(due)}</td>
+      <td class="num">${fmt(monthPaid)}</td>
+      <td class="num"><span class="diff-value ${left === 0 ? 'diff-zero' : (left > 0 ? 'diff-pos' : 'diff-neg')}">${fmt(left)}</span></td>
+    </tr>
+  `;
+}
+
+function renderViewDateBanner() {
+  const banner = document.getElementById('viewDateBanner');
+  const text = document.getElementById('viewDateBannerText');
+  if (!banner) return;
+  banner.classList.toggle('hidden', !isViewingPast());
+  if (isViewingPast()) {
+    const [y, m, d] = viewDate.split('-');
+    text.textContent = `Просмотр: ${d}.${m}.${y} — только просмотр`;
+  }
+}
+
 function renderAll() {
+  balanceEntryCache.clear();
+  renderViewDateBanner();
   renderMethods();
   renderExpenseTable();
+  renderDebtSummary();
   renderKpis();
+  renderRowMenu();
 }
 
 // one-time import of the user's real spreadsheet data, requested explicitly —
@@ -863,11 +1205,153 @@ function initTheme() {
   });
 }
 
-if (document.getElementById('methodsRow')) {
-  setDateDisplay();
-  setupGlobalEvents();
-  seedIfEmpty();
-  renderAll();
+// ---------- auth ----------
+
+let authMode = 'login'; // 'login' | 'register'
+let authError = '';
+
+function mapAuthError(err) {
+  switch (err && err.code) {
+    case 'auth/email-already-in-use': return 'Этот email уже зарегистрирован. Войдите.';
+    case 'auth/invalid-email': return 'Введите корректную почту.';
+    case 'auth/weak-password': return 'Пароль должен быть не короче 6 символов.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Неверная почта или пароль.';
+    default: return 'Что-то пошло не так. Попробуйте ещё раз.';
+  }
 }
-if (document.getElementById('historyList')) renderHistoryPage();
+
+function renderAuthForm() {
+  const gate = document.getElementById('authGate');
+  const isLogin = authMode === 'login';
+  gate.innerHTML = `
+    <div class="panel auth-wrap">
+      <div class="auth-title">${isLogin ? 'Вход' : 'Регистрация'}</div>
+      <form id="authForm">
+        <input class="auth-input" type="email" id="authEmail" placeholder="Электронная почта" required>
+        <input class="auth-input" type="password" id="authPassword" placeholder="Пароль" required>
+        ${isLogin ? '' : '<input class="auth-input" type="password" id="authPassword2" placeholder="Повторите пароль" required>'}
+        ${authError ? `<div class="auth-error">${escapeHtml(authError)}</div>` : ''}
+        <button type="submit" class="btn btn-primary" style="width:100%;">${isLogin ? 'Войти' : 'Создать аккаунт'}</button>
+      </form>
+      <div class="auth-toggle">${isLogin
+        ? 'Нет аккаунта? <a id="authToggle">Зарегистрироваться</a>'
+        : 'Уже есть аккаунт? <a id="authToggle">Войти</a>'}</div>
+    </div>
+  `;
+  gate.querySelector('#authToggle').addEventListener('click', () => {
+    authMode = isLogin ? 'register' : 'login';
+    authError = '';
+    renderAuthForm();
+  });
+  gate.querySelector('#authForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = gate.querySelector('#authEmail').value.trim();
+    const password = gate.querySelector('#authPassword').value;
+    if (isLogin) {
+      auth.signInWithEmailAndPassword(email, password).catch((err) => {
+        authError = mapAuthError(err);
+        renderAuthForm();
+      });
+    } else {
+      const password2 = gate.querySelector('#authPassword2').value;
+      if (password !== password2) { authError = 'Пароли не совпадают.'; renderAuthForm(); return; }
+      auth.createUserWithEmailAndPassword(email, password).catch((err) => {
+        authError = mapAuthError(err);
+        renderAuthForm();
+      });
+    }
+  });
+}
+
+function showAuthGate() {
+  document.getElementById('authGate').classList.remove('hidden');
+  const app = document.getElementById('app');
+  if (app) app.classList.add('hidden');
+  renderAuthForm();
+}
+
+function renderCurrentPage() {
+  if (document.getElementById('methodsRow')) renderAll();
+  if (document.getElementById('historyList')) renderHistoryPage();
+}
+
+function onSnapshotError(err) {
+  console.error('Snapshot listener failed', err);
+  alert('Не удалось загрузить данные: проверьте соединение.');
+}
+// Resolves only once all three docs have delivered their first snapshot, so
+// callers can hold off wiring up any mutating UI until CACHE actually
+// reflects the real shared data instead of its empty initial state.
+function attachSnapshotListeners() {
+  return new Promise((resolve) => {
+    const markLoaded = (key) => {
+      snapshotsLoaded[key] = true;
+      if (allDataLoaded()) resolve();
+    };
+    db.collection('cashflow').doc('rows').onSnapshot((doc) => {
+      CACHE.rows = (doc.data() && doc.data().data) || [];
+      markLoaded('rows');
+      renderCurrentPage();
+    }, onSnapshotError);
+    db.collection('cashflow').doc('expenses').onSnapshot((doc) => {
+      CACHE.expenses = (doc.data() && doc.data().data) || [];
+      markLoaded('expenses');
+      renderCurrentPage();
+    }, onSnapshotError);
+    db.collection('cashflow').doc('balances').onSnapshot((doc) => {
+      CACHE.balances = (doc.data() && doc.data().data) || {};
+      markLoaded('balances');
+      renderCurrentPage();
+    }, onSnapshotError);
+  });
+}
+
+// One-time migration: the admin's real, currently-accumulated data lives in
+// this browser's localStorage. On the admin's first login after this
+// shipped, seed the shared Firestore docs from it — but only if nobody has
+// seeded them yet, so this never runs again (and never overwrites live data).
+function migrateLocalDataIfNeeded() {
+  return db.collection('cashflow').doc('rows').get().then((rowsDoc) => {
+    if (rowsDoc.exists) return;
+    const batch = db.batch();
+    batch.set(db.collection('cashflow').doc('rows'), { data: load(STORAGE.rows, []) });
+    batch.set(db.collection('cashflow').doc('expenses'), { data: load(STORAGE.expenses, []) });
+    batch.set(db.collection('cashflow').doc('balances'), { data: load(STORAGE.balances, {}) });
+    return batch.commit();
+  });
+}
+
+function enterApp(authUid, isAdmin) {
+  state.currentUser = authUid;
+  state.isAdmin = isAdmin;
+  if (!isAdmin) document.querySelectorAll('.admin-only').forEach((el) => el.remove());
+
+  (isAdmin ? migrateLocalDataIfNeeded() : Promise.resolve()).catch((err) => {
+    console.error('Migration failed', err);
+  }).then(() => attachSnapshotListeners()).then(() => {
+    // only now does CACHE hold the real shared data — safe to reveal the
+    // app and let the admin start mutating it
+    document.getElementById('authGate').classList.add('hidden');
+    const app = document.getElementById('app');
+    if (app) app.classList.remove('hidden');
+    if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); setupGlobalEvents(); }
+  });
+}
+
+document.getElementById('authGate').innerHTML = '<div class="auth-wrap empty-hint" style="text-align:center;">Загрузка…</div>';
+document.getElementById('authGate').classList.remove('hidden');
+
+auth.onAuthStateChanged((user) => {
+  if (state.currentUser) return; // already entered via enterApp() above
+  if (!user) { showAuthGate(); return; }
+  db.collection('admins').doc(user.uid).get()
+    .then((adminDoc) => enterApp(user.uid, adminDoc.exists))
+    .catch(() => {
+      authError = 'Не удалось загрузить данные. Проверьте соединение.';
+      showAuthGate();
+    });
+});
+
 if (document.getElementById('themeToggle')) initTheme();

@@ -8,7 +8,14 @@
 </head>
 <body>
 
-<div class="app">
+<div id="authGate" class="hidden"></div>
+
+<div class="app hidden" id="app">
+
+  <div class="view-date-banner hidden" id="viewDateBanner">
+    <span id="viewDateBannerText"></span>
+    <button type="button" id="viewDateTodayBtn" class="btn btn-secondary">Сегодня</button>
+  </div>
 
   <header class="topbar">
     <h1>ICON FINANCE</h1>
@@ -41,12 +48,13 @@
     <div class="panel-head">
       <h2>Наименования</h2>
       <div class="panel-head-actions">
-        <button id="newMonthBtn" class="btn btn-secondary">Перейти к новому месяцу</button>
-        <button id="toggleAddRow" class="btn btn-secondary">+ Добавить</button>
+        <input type="date" id="viewDateInput" class="date-picker-input" title="Показать данные за день">
+        <button id="newMonthBtn" class="btn btn-secondary admin-only">Перейти к новому месяцу</button>
+        <button id="toggleAddRow" class="btn btn-secondary admin-only">+ Добавить</button>
       </div>
     </div>
 
-    <form id="newRowForm" class="inline-form hidden">
+    <form id="newRowForm" class="inline-form hidden admin-only">
       <input type="text" id="newRowPayDate" placeholder="Дата (любая, 5 число...)">
       <input type="text" id="newRowName" placeholder="Название" required>
       <input type="text" inputmode="numeric" id="newRowDue" placeholder="Должны" data-amount required>
@@ -72,10 +80,32 @@
     </table>
   </div>
 
+  <div class="panel" id="debtSummaryPanel">
+    <div class="panel-head">
+      <h2>Долги</h2>
+    </div>
+    <table class="data-table debt-summary-table">
+      <thead>
+        <tr>
+          <th>Наименования</th>
+          <th class="num">Должны</th>
+          <th class="num">Отдали в этом месяце</th>
+          <th class="num">Осталось</th>
+        </tr>
+      </thead>
+      <tbody id="debtSummaryBody"></tbody>
+      <tfoot id="debtSummaryFoot"></tfoot>
+    </table>
+  </div>
+
 </div>
 
 <button id="themeToggle" class="theme-toggle" title="Тема">🌙</button>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -17,22 +17,77 @@
   --accent: #0071e3;
   --accent-press: #0059b3;
   --orange: #ff9f0a;
-  --expense-bg: #fdecea;
-  --expense-bg-hover: #fbdedb;
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --radius-sm: 10px;
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.05);
+  /* Apple's own deceleration curve (UIKit/SwiftUI's easeOut-ish spring
+     approximation) — used everywhere something used to transition on
+     plain `ease`, for a smoother, less linear-feeling settle. */
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Liquid Glass — translucent, blurred surfaces on floating/card containers.
+     backdrop-filter is applied ONLY here (panel/kpi-card/method-col/modal/
+     row-menu/autocomplete-menu) — a small, bounded set of elements that never
+     scales with data volume. It must NEVER go on per-row/per-item elements
+     (cat-index, row action buttons, etc.) — blurring dozens of those at once
+     is what caused a real hang before. That hang's actual root cause turned
+     out to be an unrelated exponential-recursion bug (since fixed), so blur
+     on this small, fixed-count set of containers is safe. */
+  /* Clean, even glass — a flat translucent tint (no diagonal sheen, which
+     read as a blotchy patch rather than glass) plus a crisp top/bottom
+     bevel and a floating shadow to sell the material. */
+  --glass-surface: rgba(255, 255, 255, 0.28);
+  --glass-surface-strong: rgba(255, 255, 255, 0.42);
+  /* Flat (non-diagonal) tint for small round controls — the 3-stop diagonal
+     sheen above looks like a blotchy two-tone patch at ~24px, so tiny glass
+     buttons get a plain, even translucency instead. */
+  --glass-tint: rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.9);
+  --glass-blur: blur(24px) saturate(200%);
+  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 1), inset 0 -1px 0 rgba(0, 0, 0, 0.05), inset 1px 0 0 rgba(255, 255, 255, 0.7), inset -1px 0 0 rgba(255, 255, 255, 0.35);
+  --glass-shadow: 0 1px 1px rgba(0, 0, 0, 0.04), 0 10px 28px rgba(0, 0, 0, 0.09), 0 24px 48px rgba(0, 0, 0, 0.07);
 }
 
 * { box-sizing: border-box; }
 
 body {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* soft, blurred color blooms behind the glass panels — without something
+   colorful to refract, backdrop-filter has nothing to show */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  /* TEMP: colorless variant requested for comparison — colored blobs
+     commented out below, restore by swapping the `background` line back. */
+  background: none;
+  /*
+  background:
+    radial-gradient(circle at 12% 18%, rgba(0, 113, 227, 0.22), transparent 42%),
+    radial-gradient(circle at 88% 12%, rgba(52, 199, 89, 0.18), transparent 40%),
+    radial-gradient(circle at 55% 88%, rgba(255, 159, 10, 0.16), transparent 45%),
+    radial-gradient(circle at 92% 92%, rgba(224, 57, 63, 0.13), transparent 40%);
+  */
+  filter: blur(70px);
+  pointer-events: none;
+}
+:root[data-theme="dark"] body::before {
+  /* That light-source glow existed to give backdrop-filter something to
+     catch — with Liquid Glass removed there's no material left to light,
+     so the page goes flat like the rest of classic Apple UI. */
+  background: none;
+  filter: none;
 }
 
 .app {
@@ -70,9 +125,13 @@ body {
 }
 .modal-overlay.hidden { display: none; }
 .modal {
-  background: var(--surface);
+  background: var(--glass-surface-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  contain: paint;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   width: 100%;
   max-width: 560px;
   max-height: 80vh;
@@ -97,15 +156,16 @@ body {
   padding: 0 24px 14px;
 }
 .modal-tab {
-  border: none;
-  background: var(--surface-tint);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface);
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 590;
   padding: 8px 16px;
   border-radius: 980px;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  box-shadow: var(--glass-highlight);
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .modal-tab:hover { background: var(--border); }
 .modal-tab.active { background: var(--accent); color: white; }
@@ -181,14 +241,15 @@ body {
 .history-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; }
 .filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-chip {
-  border: 1px solid var(--border-strong);
-  background: var(--surface-tint);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface);
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 590;
   padding: 7px 14px;
   border-radius: 980px;
   cursor: pointer;
+  box-shadow: var(--glass-highlight);
 }
 .filter-chip.active { background: var(--accent); color: white; border-color: var(--accent); }
 #historyDateFilter {
@@ -209,12 +270,18 @@ body {
   margin-bottom: 12px;
 }
 .kpi-card {
-  background: var(--surface);
+  background: var(--glass-surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  contain: paint;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   padding: 22px 24px;
   text-align: left;
+  transition: transform 0.3s var(--ease-smooth), box-shadow 0.3s var(--ease-smooth);
 }
+.kpi-card:hover { transform: translateY(-2px); }
 .kpi-label {
   font-size: 13px;
   font-weight: 590;
@@ -254,15 +321,20 @@ body {
    bordered pill — less glare than an outline, same at-a-glance color coding. */
 .method-col {
   position: relative;
-  background: var(--surface);
+  background: var(--glass-surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   /* no overflow:hidden here — a box-shadow/clip always follows the card's
      own border-radius and recedes at the corners. The stripe is a plain
      ::before rectangle instead, unrounded, so it runs the full height. */
   display: flex;
   flex-direction: column;
+  transition: transform 0.3s var(--ease-smooth), box-shadow 0.3s var(--ease-smooth);
 }
+.method-col:hover { transform: translateY(-2px); }
 .method-col::before {
   content: "";
   position: absolute;
@@ -275,7 +347,34 @@ body {
 .method-col.stripe-green::before { background: var(--green); box-shadow: 0 0 9px 1px var(--green); }
 .method-col.stripe-red::before { background: var(--red); box-shadow: 0 0 9px 1px var(--red); }
 .method-col.stripe-blue::before { background: var(--accent); box-shadow: 0 0 9px 1px var(--accent); }
+/* the neon glow is a Liquid Glass flourish — the colored stripe looks like
+   it's lit from within the material. Dark-only: on light backgrounds a
+   glow reads as a muddy halo rather than an internal light source. */
 :root:not([data-theme="dark"]) .method-col::before { box-shadow: none; }
+
+/* Dark theme adds a rounded icon-badge next to the title, on top of the
+   glowing edge stripe (kept — liked separately from the badge). */
+:root[data-theme="dark"] .col-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 22px;
+}
+:root[data-theme="dark"] .col-head::before {
+  content: "";
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+:root[data-theme="dark"] .method-col.stripe-green .col-head::before { content: "↑"; background: rgba(48, 209, 88, 0.18); color: var(--green); }
+:root[data-theme="dark"] .method-col.stripe-red .col-head::before { content: "↓"; background: rgba(255, 69, 58, 0.18); color: var(--red); }
+:root[data-theme="dark"] .method-col.stripe-blue .col-head::before { content: "Σ"; background: rgba(41, 151, 255, 0.18); color: var(--accent); }
 
 /* children that sit at the card's rounded top/bottom edges need their own
    matching radius now that the card no longer clips its content */
@@ -291,7 +390,7 @@ body {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  padding: 18px 20px 8px;
+  padding: 18px 44px 8px 20px;
   color: var(--text);
 }
 
@@ -318,19 +417,17 @@ body {
 .cat-row {
   font-size: 15px;
   border-bottom: 1px solid var(--border);
-  transition: background 0.12s ease;
-  background: var(--expense-bg);
-  box-shadow: inset 3px 0 0 #c0392b, 0 0 14px rgba(192, 57, 43, 0.3);
+  transition: background 0.2s var(--ease-smooth);
 }
-.cat-row:hover { background: var(--expense-bg-hover); }
+.cat-row:hover { background: var(--surface-tint); }
 .cat-index {
   grid-column: 1;
   justify-self: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-tint);
+  border: 1.5px solid var(--border-strong);
+  background: none;
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 650;
@@ -340,12 +437,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 5px rgba(255, 255, 255, 0.35);
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), border-color 0.2s var(--ease-smooth);
 }
 .cat-index:hover { border-color: var(--accent); color: var(--accent); }
-.cat-row .cat-name { color: #c0392b; font-weight: 600; transition: color 0.12s ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.cat-row .cat-amount { color: #c0392b; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.12s ease; }
+/* checked = paid — a plain filled green circle reads as "done" without any
+   glow/shadow noise; unchecked stays a quiet neutral ring until you act on it */
+.cat-row.checked .cat-index {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+.cat-row .cat-name { color: var(--text); font-weight: 500; transition: color 0.2s var(--ease-smooth); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cat-row .cat-amount { color: var(--red); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; transition: color 0.2s var(--ease-smooth); }
+/* paid items recede — muted and struck through — so the eye goes straight
+   to what's still outstanding */
+.cat-row.checked .cat-name, .cat-row.checked .cat-amount { color: var(--text-muted); text-decoration: line-through; }
 .cat-row .cat-del {
   justify-self: center;
   border: none;
@@ -357,7 +463,7 @@ body {
   height: 22px;
   border-radius: 6px;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .cat-row:hover .cat-del { opacity: 1; }
 .cat-row .cat-del:hover { color: var(--red); }
@@ -368,7 +474,6 @@ body {
   font-weight: 650;
   padding: 11px 20px;
   border-top: 1px solid var(--border);
-  background: var(--surface-tint);
   color: var(--text);
 }
 .cat-sum-row span:nth-child(2) { grid-column: 2; font-size: 13px; color: var(--text-muted); font-weight: 590; }
@@ -399,10 +504,13 @@ body {
    always show the full list instead of getting clipped */
 .autocomplete-menu {
   position: fixed;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
+  background: var(--glass-surface-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  contain: paint;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   max-height: 280px;
   overflow-y: auto;
   z-index: 1000;
@@ -420,8 +528,8 @@ body {
 .autocomplete-item:hover { background: var(--surface-tint); }
 
 .cat-add-row button {
-  border: 1px solid var(--border-strong);
-  background: var(--surface-tint);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-tint);
   color: var(--text-muted);
   border-radius: 50%;
   width: 30px;
@@ -430,7 +538,7 @@ body {
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), border-color 0.2s var(--ease-smooth);
 }
 .cat-add-row button:hover { background: var(--accent); color: white; border-color: var(--accent); }
 
@@ -439,6 +547,9 @@ body {
    so numbers align whether or not that row has a delete button */
 .balance-row {
   display: grid;
+  /* 24px last column fits .source-del's 22px button; Было/Поступило rows
+     no longer have a trailing button at all (removed) and just leave it
+     blank, like the sum row's kebab slot does when there's no menu. */
   grid-template-columns: minmax(56px, 1fr) minmax(70px, 1.05fr) 24px;
   align-items: center;
   gap: 10px;
@@ -461,7 +572,6 @@ body {
   border-bottom: none;
   font-weight: 650;
   color: var(--text);
-  background: var(--surface-tint);
 }
 .balance-row.sum span:first-child { font-size: 13px; color: var(--text-muted); font-weight: 590; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* nth-child, not last-child — the ⋯ button is the true last child now */
@@ -479,10 +589,20 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--text);
   background: transparent;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color 0.2s var(--ease-smooth), background 0.2s var(--ease-smooth);
 }
 .balance-input::placeholder { color: var(--text-muted); font-weight: 500; }
 .balance-input:hover { background: var(--surface-tint); }
+.balance-input-static {
+  width: 100%;
+  min-width: 0;
+  text-align: right;
+  padding: 6px 0 6px 10px;
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
 .balance-input:focus {
   outline: none;
   border-color: var(--accent);
@@ -501,29 +621,39 @@ body {
   height: 22px;
   border-radius: 6px;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
 .balance-row:hover .source-del { opacity: 1; }
 .source-del:hover { color: var(--red); }
 
 .btn-kebab {
-  grid-column: 3;
-  justify-self: center;
+  /* Reference card design puts the "···" menu flush in the card's top-right
+     corner, next to the title — not inline in a data row. Absolute-position
+     it there instead of moving it in the markup; it stays the true last
+     child of `.balance-row.sum` in the DOM (see app.js), it just no longer
+     renders in that row's flow, so that row's reserved action column is
+     simply empty now (matches the blank slot every other balance-row
+     already has when it has no trailing button). */
+  position: absolute;
+  top: 14px;
+  right: 14px;
   border: none;
-  background: var(--surface-tint);
+  background: none;
   color: var(--text-muted);
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s ease, color 0.12s ease;
+  box-shadow: none;
+  opacity: 0.5;
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
 }
-.btn-kebab:hover { background: var(--accent); color: white; }
+.btn-kebab:hover { background: var(--glass-tint); color: var(--text); opacity: 1; }
 
 .source-add-row {
   display: flex;
@@ -572,11 +702,21 @@ body {
 
 /* Panel / main table */
 .panel {
-  background: var(--surface);
+  /* A lighter blur radius than the small cards (cheaper to composite) — this
+     panel wraps the whole debt table and can get tall with real data. No
+     contain:paint here — the row ⋯ menu is position:fixed and nested inside
+     this panel; contain would turn this into its containing block and
+     break/clip its on-screen positioning. */
+  background: var(--glass-surface-strong);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   padding: 26px 28px;
+  margin-bottom: 24px;
 }
+.panel:last-child { margin-bottom: 0; }
 .panel-head {
   display: flex;
   align-items: center;
@@ -608,26 +748,35 @@ body {
 .inline-form input:focus { outline: none; border-color: var(--accent); }
 
 .btn {
-  border: none;
+  border: 1px solid var(--glass-border);
   border-radius: 980px;
   padding: 9px 18px;
   font-size: 14px;
   font-weight: 590;
   cursor: pointer;
-  transition: background 0.12s ease, opacity 0.12s ease;
+  box-shadow: var(--glass-highlight);
+  transition: background 0.25s var(--ease-smooth), box-shadow 0.25s var(--ease-smooth), transform 0.18s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
 }
-.btn-primary { background: var(--accent); color: white; }
-.btn-primary:hover { background: var(--accent-press); }
-.btn-secondary { background: var(--surface-tint); color: var(--text); border: 1px solid var(--border-strong); }
-.btn-secondary:hover { background: var(--border); }
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  background: linear-gradient(180deg, rgba(30, 144, 255, 0.95), var(--accent) 70%);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.btn-primary:hover { background: linear-gradient(180deg, rgba(30, 144, 255, 1), var(--accent-press) 70%); }
+.btn-secondary {
+  background: var(--glass-surface);
+  color: var(--text);
+}
+.btn-secondary:hover { background: var(--glass-surface-strong); }
 
-.expense-table {
+.expense-table, .debt-summary-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 14px;
 }
-.expense-table th {
+.expense-table th, .debt-summary-table th {
   background: transparent;
   color: var(--text-muted);
   text-align: left;
@@ -638,17 +787,18 @@ body {
   padding: 0 12px 12px;
   border-bottom: 1px solid var(--border-strong);
 }
-.expense-table th.num, .expense-table td.num { text-align: right; }
+.expense-table th.num, .expense-table td.num,
+.debt-summary-table th.num, .debt-summary-table td.num { text-align: right; }
 .expense-table th.drag-col { width: 28px; padding-left: 12px; }
-.expense-table td {
+.expense-table td, .debt-summary-table td {
   padding: 14px 12px;
   border-bottom: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
 }
-.expense-table tbody tr:hover { background: var(--surface-tint); }
-.expense-table tr:last-child td { border-bottom: none; }
+.expense-table tbody tr:hover, .debt-summary-table tbody tr:hover { background: var(--surface-tint); }
+.expense-table tr:last-child td, .debt-summary-table tr:last-child td { border-bottom: none; }
 
-.expense-table td.num { font-weight: 700; }
+.expense-table td.num, .debt-summary-table td.num { font-weight: 700; }
 .due-cell { color: var(--text); }
 .date-cell { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 .info-icon {
@@ -697,8 +847,11 @@ body {
 
 .actions-cell { text-align: right; white-space: nowrap; }
 .btn-icon {
-  border: none;
-  background: var(--surface-tint);
+  border: 1px solid var(--glass-border);
+  /* no backdrop-filter — this repeats once per debt row (the ⋯ menu toggle),
+     and blurring dozens of independent small layers is what made the page
+     unresponsive with real data (dozens of rows). Flat tint reads the same. */
+  background: var(--glass-surface-strong);
   color: var(--text-muted);
   border-radius: var(--radius-sm);
   width: 28px;
@@ -707,9 +860,14 @@ body {
   cursor: pointer;
   font-size: 13px;
   margin-left: 6px;
-  transition: background 0.12s ease, color 0.12s ease;
+  box-shadow: var(--glass-highlight);
+  transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth);
 }
-.btn-icon:hover { background: var(--border); color: var(--text); }
+.btn-icon:hover { background: var(--glass-surface-strong); color: var(--text); }
+/* the row ⋯ menu toggle specifically (not the ✓/✕ edit-form buttons,
+   which share .btn-icon) — dimmed so it recedes until you hover it. */
+.btn-icon[data-row-menu-toggle] { opacity: 0.45; transition: background 0.2s var(--ease-smooth), color 0.2s var(--ease-smooth), opacity 0.2s var(--ease-smooth); }
+.btn-icon[data-row-menu-toggle]:hover { opacity: 1; }
 
 .row-menu {
   position: fixed;
@@ -717,10 +875,13 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 200px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
+  background: var(--glass-surface-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  contain: paint;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   padding: 6px;
 }
 .row-menu.hidden { display: none; }
@@ -767,12 +928,16 @@ body {
 .edit-form input[name="name"] { flex: 1 1 200px; }
 .edit-form input[name="due"] { width: 130px; }
 
-.expense-table tfoot td {
-  font-weight: 700;
+.expense-table tfoot td, .debt-summary-table tfoot td {
+  font-weight: 800;
+  font-size: 17px;
   border-top: 1px solid var(--text);
   border-bottom: none;
-  padding-top: 16px;
+  padding-top: 20px;
+  padding-bottom: 4px;
 }
+
+#debtSummaryPanel.hidden { display: none; }
 
 /* keep the 3-column layout on tablets/laptops — only stack on genuinely
    narrow (phone-width) screens */
@@ -783,18 +948,54 @@ body {
 }
 
 :root[data-theme="dark"] {
-  --bg: #000000;
-  --surface: #1c1c1e;
-  --surface-tint: #2c2c2e;
+  /* Near-black charcoal, not flat #000 — pure black read too harsh/flat
+     against a photo reference of a soft dark gray. Body font-family is
+     already -apple-system/SF Pro globally (see body{} above) — SwiftUI's
+     own native stack — so no per-theme font override is needed here. */
+  --bg: #1a1a1c;
+  --surface: #202022;
+  --surface-tint: #29292b;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --text: #f5f5f7;
+  --text: #ffffff;
   --text-muted: #98989d;
   --head-bg: #ffffff;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
-  --expense-bg: #3d1c1e;
-  --expense-bg-hover: #4a2224;
+
+  /* Sky Link Blue — Apple's own dark-surface accent; Action Blue #0071e3
+     "disappears against tile background" per Apple's design spec, so the
+     accent shifts brighter on dark, same as apple.com itself does. System
+     green/red match the SwiftUI semantic-color palette (systemGreen/Red)
+     at their dark-appearance values. */
+  --blue: #2997ff;
+  --accent: #2997ff;
+  --accent-press: #0071e3;
+  --green: #30d158;
+  --red: #ff453a;
+
+  /* Liquid Glass material removed on request — no backdrop-filter, no
+     translucency, no specular bevel. Classic flat Apple style instead
+     (macOS System Settings / SwiftUI grouped-list): solid opaque surfaces,
+     a single soft ambient shadow, plain hairline borders. */
+  --glass-blur: none;
+  --glass-surface: #232325;
+  --glass-surface-strong: #2a2a2c;
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-tint: #2a2a2c;
+  --glass-highlight: 0 0 #0000;
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 18px rgba(0, 0, 0, 0.3);
+
+  /* Apple's own radius scale (design-md/apple: {rounded.lg} 18px on cards,
+     {rounded.pill} on every CTA) — restores the app's default light-theme
+     values rather than a brand-specific override. */
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
 }
+
+/* .panel hardcodes its own (lighter) blur independent of --glass-blur —
+   needs its own override to go flat too. */
+:root[data-theme="dark"] .panel { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 .theme-toggle {
   position: fixed;
@@ -804,10 +1005,68 @@ body {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-surface-strong);
   color: var(--text);
   font-size: 20px;
   cursor: pointer;
-  box-shadow: var(--shadow);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
+  transition: transform 0.25s var(--ease-smooth), background 0.25s var(--ease-smooth);
+}
+.theme-toggle:hover { transform: scale(1.06); }
+.theme-toggle:active { transform: scale(0.95); }
+
+.hidden { display: none; }
+
+.auth-wrap {
+  max-width: 380px;
+  margin: 80px auto;
+}
+.auth-title { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
+.auth-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-tint);
+  color: var(--text);
+  font-size: 14px;
+}
+.auth-input:focus { outline: none; border-color: var(--accent); }
+.auth-error { color: var(--red); font-size: 13px; margin-bottom: 10px; }
+.auth-toggle {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 12px;
+}
+.auth-toggle a { color: var(--accent); cursor: pointer; }
+
+/* ---------- historical date view ---------- */
+
+.view-date-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  background: rgba(255, 159, 10, 0.14);
+  border: 1px solid rgba(255, 159, 10, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.date-picker-input {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
 }
