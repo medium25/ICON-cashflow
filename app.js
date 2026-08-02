@@ -30,7 +30,6 @@ const METHOD_PHRASE = { 'Наличка': 'в наличке', 'Click': 'в Clic
 const fmt = (n) => Math.round(n || 0).toLocaleString('ru-RU');
 const fmtSigned = (n) => n > 0 ? `-${fmt(n)}` : '—';
 const todayStr = () => new Date().toISOString().slice(0, 10);
-const monthOf = (dateStr) => dateStr.slice(0, 7);
 
 // The date the whole page is currently showing. Defaults to today and only
 // ever changes via the date picker (initDatePicker) — never persisted, so a
@@ -343,11 +342,16 @@ function paidTodayByName(name, date) {
     .filter(e => e.name.trim() === name.trim() && e.date === date && !e.deleted)
     .reduce((s, e) => s + e.amount, 0);
 }
-// how much a given debt-row name was paid this month, across all 3 methods
-// (this is why category entries can safely reset daily — history is preserved here)
-function paidThisMonthByName(name, month) {
+// How much a given debt-row name has been paid since the last "Новый
+// месяц" click, across all 3 methods, as of a given date. NOT bound to the
+// real calendar month — it used to reset itself the moment the calendar
+// rolled to a new month (even with nothing clicked), which is exactly the
+// "почему обнулилось само" complaint. The only thing that zeroes this now
+// is startNewMonth() soft-deleting the expenses; a plain calendar rollover
+// with no click leaves it exactly as it was.
+function paidThisMonthByName(name, asOfDate) {
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date.startsWith(month) && !e.deleted)
+    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && !e.deleted)
     .reduce((s, e) => s + e.amount, 0);
 }
 
@@ -669,9 +673,8 @@ function renderMethods() {
 
 function renderRow(r) {
   const date = viewDate;
-  const month = monthOf(date);
   const today = paidTodayByName(r.name, date);
-  const monthPaid = paidThisMonthByName(r.name, month);
+  const monthPaid = paidThisMonthByName(r.name, date);
   const diff = r.due - monthPaid;
   const diffClass = diff === 0 ? 'diff-zero' : (diff > 0 ? 'diff-pos' : 'diff-neg');
   // Row add/edit/delete/reorder are never day-scoped, so unlike the
@@ -759,8 +762,7 @@ function renderRowMenu() {
   });
   menu.querySelector('[data-fix-month]').addEventListener('click', () => {
     openRowMenuId = null;
-    const m = monthOf(todayStr());
-    const current = paidThisMonthByName(row.name, m);
+    const current = paidThisMonthByName(row.name, todayStr());
     const raw = prompt(`Новое значение «Отдали в этом месяце» для «${row.name}» (сейчас ${fmt(current)}):`, current);
     if (raw === null) { renderAll(); return; }
     const next = Number(String(raw).replace(/\D/g, ''));
@@ -783,7 +785,6 @@ function renderExpenseTable() {
   const tbody = document.getElementById('expenseTableBody');
   const tfoot = document.getElementById('expenseTableFoot');
   const date = viewDate;
-  const month = monthOf(date);
 
   tbody.innerHTML = rows.length
     ? rows.map(renderRow).join('')
@@ -791,7 +792,7 @@ function renderExpenseTable() {
 
   const due = rows.reduce((s, r) => s + r.due, 0);
   const today = rows.reduce((s, r) => s + paidTodayByName(r.name, date), 0);
-  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, month), 0);
+  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, date), 0);
   const diff = due - monthPaid;
   tfoot.innerHTML = rows.length ? `
     <tr>
@@ -1148,14 +1149,13 @@ function renderDebtSummary() {
   const rows = getRows().filter(r => r.isDebt);
   const tbody = document.getElementById('debtSummaryBody');
   const tfoot = document.getElementById('debtSummaryFoot');
-  const month = monthOf(viewDate);
 
   panel.classList.toggle('hidden', rows.length === 0);
   tbody.innerHTML = '';
   if (!rows.length) { tfoot.innerHTML = ''; return; }
 
   const due = rows.reduce((s, r) => s + r.due, 0);
-  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, month), 0);
+  const monthPaid = rows.reduce((s, r) => s + paidThisMonthByName(r.name, viewDate), 0);
   const left = due - monthPaid;
   tfoot.innerHTML = `
     <tr>
