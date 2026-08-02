@@ -568,6 +568,7 @@ function renderMethods() {
       const name = form.querySelector('[data-expense-name]').value.trim();
       const amount = parseAmount(form.querySelector('[data-expense-amount]'));
       if (!amount || amount <= 0) return;
+      if (!requirePastEditCode()) return;
       addExpense(method, name, amount, date);
       closeAllAutocomplete();
       renderAll();
@@ -575,7 +576,11 @@ function renderMethods() {
   });
 
   container.querySelectorAll('[data-check-expense]').forEach(btn => {
-    btn.addEventListener('click', () => { toggleExpense(btn.dataset.checkExpense); renderAll(); });
+    btn.addEventListener('click', () => {
+      if (!requirePastEditCode()) return;
+      toggleExpense(btn.dataset.checkExpense);
+      renderAll();
+    });
   });
 
   container.querySelectorAll('[data-del-expense]').forEach(btn => {
@@ -583,6 +588,7 @@ function renderMethods() {
       const id = btn.dataset.delExpense;
       const item = getExpenses().find(e => e.id === id);
       if (!item || !confirm(`Удалить платёж «${item.name || 'без названия'}» (${fmt(item.amount)})?`)) return;
+      if (!requirePastEditCode()) return;
       deleteExpense(id);
       renderAll();
     });
@@ -593,10 +599,12 @@ function renderMethods() {
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
+      if (!requirePastEditCode()) { renderAll(); return; }
       setWas(input.dataset.balanceWas, date, parseAmount(input));
       renderAll();
     });
     input.addEventListener('change', () => {
+      if (!requirePastEditCode()) { renderAll(); return; }
       setWas(input.dataset.balanceWas, date, parseAmount(input));
       renderAll();
     });
@@ -606,10 +614,12 @@ function renderMethods() {
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
+      if (!requirePastEditCode()) { renderAll(); return; }
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
       renderAll();
     });
     input.addEventListener('change', () => {
+      if (!requirePastEditCode()) { renderAll(); return; }
       setIncome(input.dataset.balanceIncome, date, parseAmount(input));
       renderAll();
     });
@@ -636,6 +646,7 @@ function renderMethods() {
         alert('Укажите сумму больше нуля.');
         return;
       }
+      if (!requirePastEditCode()) return;
       addSource(method, date, label, amount);
       openSourceForm = null;
       renderAll();
@@ -647,6 +658,7 @@ function renderMethods() {
       const id = btn.dataset.delSource;
       const item = getBalanceEntry(method, date).sources.find(s => s.id === id);
       if (!item || !confirm(`Удалить источник «${item.label}» (${fmt(item.amount)})?`)) return;
+      if (!requirePastEditCode()) return;
       removeSource(method, date, id);
       renderAll();
     });
