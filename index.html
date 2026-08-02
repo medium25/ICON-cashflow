@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cashflow Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,7 +27,18 @@
   </div>
 
   <header class="topbar">
-    <h1>ICON FINANCE</h1>
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 3 3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="0" y="0" width="1" height="1" fill="#6e6e6e"/>
+        <rect x="1" y="0" width="1" height="1" fill="#2b2b2b"/>
+        <rect x="2" y="0" width="1" height="2" fill="#000000"/>
+        <rect x="0" y="1" width="1" height="1" fill="#8f8f8f"/>
+        <rect x="1" y="1" width="1" height="1" fill="#2b2b2b"/>
+        <rect x="0" y="2" width="1" height="1" fill="#b3b3b3"/>
+        <rect x="1" y="2" width="1" height="1" fill="#6e6e6e"/>
+      </svg>
+      <h1>ICON FINANCE</h1>
+    </div>
     <div class="topbar-right">
       <div class="date-display" id="todayDate"></div>
       <input type="date" id="viewDateInput" class="date-picker-input" title="Показать данные за день">
