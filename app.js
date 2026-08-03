@@ -110,6 +110,49 @@ function allDataLoaded() {
   return snapshotsLoaded.rows && snapshotsLoaded.expenses && snapshotsLoaded.balances;
 }
 
+// Undo (Cmd/Ctrl+Z), up to UNDO_STACK_LIMIT steps back — save()/
+// saveBalanceEntry() are the only two places any mutation passes through, so
+// pushing "what it looked like right before this write" there would seem to
+// cover every action for free — except most mutators fetch the live CACHE
+// array/object and mutate it BY REFERENCE (list.push(...), row.comment = x,
+// entry.sources.push(...)) before ever calling save(), so by the time save()
+// reads CACHE[cacheKey] as "previous" it's already the post-mutation value
+// (same object). Mutators that build a fresh array instead (deleteRow's
+// .filter()) don't have this problem — CACHE is only reassigned inside
+// save() itself, so its own pre-reassignment read is genuinely "before". For
+// everything else, the mutator must snapshot before it touches anything;
+// these three helpers do that, and save()/saveBalanceEntry() prefer that
+// snapshot when present. suppressUndoCapture stops an undo's own write from
+// pushing itself back onto the stack, so repeated Cmd+Z walks further back
+// each time instead of just toggling the last two states.
+const UNDO_STACK_LIMIT = 20;
+let undoStack = [];
+let pendingUndoSnapshot = null;
+let suppressUndoCapture = false;
+function snapshotExpensesForUndo() {
+  pendingUndoSnapshot = { kind: 'full', key: STORAGE.expenses, previous: JSON.parse(JSON.stringify(CACHE.expenses)) };
+}
+function snapshotRowsForUndo() {
+  pendingUndoSnapshot = { kind: 'full', key: STORAGE.rows, previous: JSON.parse(JSON.stringify(CACHE.rows)) };
+}
+function snapshotBalanceForUndo(method, date) {
+  const existing = CACHE.balances[`${method}_${date}`];
+  pendingUndoSnapshot = { kind: 'balance', method, date, previous: existing ? JSON.parse(JSON.stringify(existing)) : null };
+}
+function pushUndo(entry) {
+  if (suppressUndoCapture) return;
+  undoStack.push(entry);
+  if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+}
+function undoLast() {
+  const undo = undoStack.pop();
+  if (!undo) return;
+  suppressUndoCapture = true;
+  if (undo.kind === 'full') save(undo.key, undo.previous);
+  else saveBalanceEntry(undo.method, undo.date, undo.previous);
+  suppressUndoCapture = false;
+}
+
 function countOf(value) {
   if (Array.isArray(value)) return value.length;
   if (value && typeof value === 'object') return Object.keys(value).length;
@@ -145,7 +188,13 @@ function save(key, value) {
     alert('Данные ещё загружаются. Подождите пару секунд и повторите.');
     return;
   }
-  const previous = CACHE[cacheKey];
+  // Prefer the caller's pre-mutation snapshot (see snapshotExpensesForUndo/
+  // snapshotRowsForUndo) when there is one for this exact key — CACHE[cacheKey]
+  // itself may already be the post-mutation value if the caller mutated it
+  // by reference before calling save().
+  const snapshot = pendingUndoSnapshot && pendingUndoSnapshot.kind === 'full' && pendingUndoSnapshot.key === key ? pendingUndoSnapshot : null;
+  pendingUndoSnapshot = null;
+  const previous = snapshot ? snapshot.previous : CACHE[cacheKey];
   if (isSuspiciousShrink(previous, value)) {
     const before = countOf(previous), after = countOf(value);
     if (!confirm(`Это действие уменьшит «${cacheKey}» с ${before} до ${after} записей — заметно больше, чем обычно удаляется за раз. Точно продолжить?`)) {
@@ -153,6 +202,7 @@ function save(key, value) {
       return;
     }
   }
+  pushUndo({ kind: 'full', key, previous: JSON.parse(JSON.stringify(previous)) });
   backupPreviousValue(cacheKey, previous);
   CACHE[cacheKey] = value;
   db.collection('cashflow').doc(cacheKey).set({ data: value }).catch((err) => {
@@ -223,6 +273,12 @@ function getBalanceEntry(method, date) {
 function saveBalanceEntry(method, date, entry) {
   const key = `${method}_${date}`;
   const balances = getBalances();
+  // Same "snapshot before mutation" concern as save() — setWas/addSource/etc.
+  // mutate the live balance entry by reference before calling this.
+  const snapshot = pendingUndoSnapshot && pendingUndoSnapshot.kind === 'balance' && pendingUndoSnapshot.method === method && pendingUndoSnapshot.date === date ? pendingUndoSnapshot : null;
+  pendingUndoSnapshot = null;
+  const previous = snapshot ? snapshot.previous : balances[key];
+  pushUndo({ kind: 'balance', method, date, previous: previous ? JSON.parse(JSON.stringify(previous)) : null });
   balances[key] = entry;
   if (!allDataLoaded()) {
     console.error('Blocked saveBalanceEntry() before initial data finished loading');
@@ -248,18 +304,21 @@ function saveBalanceEntry(method, date, entry) {
   renderCurrentPage();
 }
 function setWas(method, date, was) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   entry.was = was;
   entry.wasTs = Date.now();
   saveBalanceEntry(method, date, entry);
 }
 function setIncome(method, date, income) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   entry.income = income;
   entry.incomeTs = Date.now();
   saveBalanceEntry(method, date, entry);
 }
 function addSource(method, date, label, amount) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   entry.sources.push({ id: uid(), label, amount, ts: Date.now(), comment: '', deleted: false });
   saveBalanceEntry(method, date, entry);
@@ -267,16 +326,19 @@ function addSource(method, date, label, amount) {
 // soft delete — the record stays (with a deletedAt stamp) so История can
 // still show it, struck through, instead of just vanishing
 function removeSource(method, date, id) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   const s = entry.sources.find(x => x.id === id);
   if (s) { s.deleted = true; s.deletedAt = Date.now(); saveBalanceEntry(method, date, entry); }
 }
 function restoreSource(method, date, id) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   const s = entry.sources.find(x => x.id === id);
   if (s) { s.deleted = false; s.deletedAt = null; saveBalanceEntry(method, date, entry); }
 }
 function setSourceComment(method, date, id, comment) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   const s = entry.sources.find(x => x.id === id);
   if (s) { s.comment = comment; saveBalanceEntry(method, date, entry); }
@@ -374,21 +436,25 @@ function paidThisMonthByName(name, asOfDate) {
 // ---------- mutations ----------
 
 function addRow(name, due, payDate, comment) {
+  snapshotRowsForUndo();
   const rows = getRows();
   rows.push({ id: uid(), name, due, payDate: payDate || '', comment: comment || '' });
   save(STORAGE.rows, rows);
 }
 function editRow(id, name, due, payDate) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const row = rows.find(r => r.id === id);
   if (row) { row.name = name; row.due = due; row.payDate = payDate || ''; save(STORAGE.rows, rows); }
 }
 function setRowComment(id, comment) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const row = rows.find(r => r.id === id);
   if (row) { row.comment = comment; save(STORAGE.rows, rows); }
 }
 function toggleRowDebt(id) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const row = rows.find(r => r.id === id);
   if (row) { row.isDebt = !row.isDebt; save(STORAGE.rows, rows); }
@@ -399,11 +465,13 @@ function deleteRow(id) {
 // "Новый месяц" — soft-deletes every active expense so "Отдали в этом месяце"
 // zeroes out for all rows, while История still keeps the full record
 function startNewMonth() {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   list.forEach(e => { if (!e.deleted) { e.deleted = true; e.deletedAt = Date.now(); } });
   save(STORAGE.expenses, list);
 }
 function moveRow(id, toIndex) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const fromIndex = rows.findIndex(r => r.id === id);
   if (fromIndex === -1) return;
@@ -414,27 +482,32 @@ function moveRow(id, toIndex) {
 // date defaults to today for the fix-month/seed callers, which never pass
 // one; the category-add form (renderMethods) passes the day being viewed.
 function addExpense(method, name, amount, date = todayStr()) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   list.push({ id: uid(), method, name, amount, checked: false, date, ts: Date.now(), comment: '', deleted: false });
   save(STORAGE.expenses, list);
 }
 function toggleExpense(id) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.checked = !e.checked; save(STORAGE.expenses, list); }
 }
 // soft delete — kept (struck through) in История instead of disappearing
 function deleteExpense(id) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.deleted = true; e.deletedAt = Date.now(); save(STORAGE.expenses, list); }
 }
 function restoreExpense(id) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.deleted = false; e.deletedAt = null; save(STORAGE.expenses, list); }
 }
 function setExpenseComment(id, comment) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.comment = comment; save(STORAGE.expenses, list); }
@@ -1028,6 +1101,15 @@ function setupGlobalEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && openRowMenuId) { openRowMenuId = null; renderAll(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      const tag = e.target.tagName;
+      // Leave native undo alone inside text fields (editing a comment,
+      // typing a new row's name, etc.) — only step in for the app-level
+      // "undo my last save" when nothing is mid-edit.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+      e.preventDefault();
+      undoLast();
+    }
   });
   document.addEventListener('click', (e) => {
     if (openRowMenuId && !e.target.closest('.row-menu') && !e.target.closest('[data-row-menu-toggle]')) {
