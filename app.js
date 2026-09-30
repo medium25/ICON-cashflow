@@ -1666,7 +1666,10 @@ function renderAuthForm() {
       </div>
       <form id="authForm">
         ${isPhone
-          ? '<input class="auth-input" type="tel" id="authPhone" placeholder="+998 90 123 45 67" required>'
+          ? `<div class="phone-input-row">
+               <span class="phone-prefix">+998</span>
+               <input class="auth-input" type="tel" id="authPhone" placeholder="901234567" maxlength="9" required>
+             </div>`
           : '<input class="auth-input" type="email" id="authEmail" placeholder="Электронная почта" required>'}
         <input class="auth-input" type="password" id="authPassword" placeholder="Пароль" required>
         ${authError ? `<div class="auth-error">${escapeHtml(authError)}</div>` : ''}
@@ -1681,11 +1684,17 @@ function renderAuthForm() {
       renderAuthForm();
     });
   });
+  if (isPhone) {
+    const phoneInput = gate.querySelector('#authPhone');
+    phoneInput.addEventListener('input', () => {
+      phoneInput.value = phoneInput.value.replace(/\D/g, '').slice(0, 9);
+    });
+  }
   gate.querySelector('#authForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const password = gate.querySelector('#authPassword').value;
     const identifier = isPhone
-      ? phoneDigitsToEmail('998' + gate.querySelector('#authPhone').value.replace(/\D/g, '').replace(/^998/, ''))
+      ? phoneDigitsToEmail('998' + gate.querySelector('#authPhone').value.replace(/\D/g, ''))
       : gate.querySelector('#authEmail').value.trim();
     auth.signInWithEmailAndPassword(identifier, password).catch((err) => {
       authError = mapAuthError(err, authLoginMode);
