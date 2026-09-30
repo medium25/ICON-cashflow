@@ -877,6 +877,8 @@ function renderRowMenu() {
 // ---------- settings modal ----------
 
 let settingsModalEl = null;
+let employeesCache = [];
+let employeesUnsub = null;
 function ensureSettingsModal() {
   if (!settingsModalEl) {
     settingsModalEl = document.createElement('div');
@@ -900,15 +902,35 @@ function ensureSettingsModal() {
 }
 function openSettings() {
   ensureSettingsModal().classList.remove('hidden');
-  renderSettingsModal();
+  if (!employeesUnsub) {
+    employeesUnsub = db.collection('employees').onSnapshot((snap) => {
+      employeesCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderSettingsModal();
+    }, (err) => console.error('employees snapshot failed', err));
+  } else {
+    renderSettingsModal();
+  }
 }
 function closeSettings() {
   if (settingsModalEl) settingsModalEl.classList.add('hidden');
 }
+const POSITION_LABELS = { admin_role: 'Администратор', teacher: 'Учитель', accountant: 'Бухгалтер', other: 'Другое' };
+
 function renderSettingsModal() {
   const body = document.getElementById('settingsBody');
   if (!body) return;
   const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const employeeRows = employeesCache.length
+    ? employeesCache.map((emp) => `
+        <div class="employee-card ${emp.disabled ? 'disabled' : ''}">
+          <div class="employee-info">
+            <span class="employee-name">${escapeHtml(emp.name || 'Без имени')}</span>
+            <span class="employee-meta">${escapeHtml(POSITION_LABELS[emp.position] || emp.position || '')} · +${escapeHtml(emp.phone || '')} · ${emp.role === 'admin' ? 'Админ' : 'Просмотр'}</span>
+          </div>
+          <button type="button" class="btn btn-secondary" data-toggle-employee="${emp.id}">${emp.disabled ? 'Включить' : 'Отключить'}</button>
+        </div>
+      `).join('')
+    : '<div class="empty-hint">Пока нет сотрудников</div>';
   body.innerHTML = `
     <div class="settings-section">
       <div class="settings-section-title">Тема</div>
@@ -916,8 +938,24 @@ function renderSettingsModal() {
         <span id="settingsThemeLabel">${dark ? 'Тёмная' : 'Светлая'}</span>
       </button>
     </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Сотрудники</div>
+      <div id="employeeList">${employeeRows}</div>
+      <button type="button" class="btn btn-primary" id="addEmployeeBtn" style="margin-top:12px;">+ Добавить сотрудника</button>
+    </div>
   `;
   body.querySelector('#settingsThemeBtn').addEventListener('click', toggleTheme);
+  body.querySelectorAll('[data-toggle-employee]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.toggleEmployee;
+      const emp = employeesCache.find((x) => x.id === id);
+      if (!emp) return;
+      db.collection('employees').doc(id).update({ disabled: !emp.disabled }).catch((err) => {
+        console.error('toggle employee failed', err);
+        alert('Не удалось сохранить: проверьте соединение.');
+      });
+    });
+  });
 }
 
 function renderExpenseTable() {
