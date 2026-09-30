@@ -14,6 +14,25 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 db.settings({ experimentalAutoDetectLongPolling: true });
 
+// A brand-new secondary app instance (not the primary `auth`) so that
+// creating an employee's Firebase Auth account never swaps out the
+// currently-signed-in admin's own session — the client SDK's
+// createUserWithEmailAndPassword() otherwise signs the caller in as the
+// user it just created. Lazily created on first use, reused after.
+let employeeCreatorApp = null;
+function getEmployeeCreatorAuth() {
+  if (!employeeCreatorApp) employeeCreatorApp = firebase.initializeApp(firebaseConfig, 'employeeCreator');
+  return employeeCreatorApp.auth();
+}
+function createEmployeeAccount(phoneDigits, password) {
+  const creatorAuth = getEmployeeCreatorAuth();
+  return creatorAuth.createUserWithEmailAndPassword(phoneDigitsToEmail(phoneDigits), password)
+    .then((cred) => {
+      const uid = cred.user.uid;
+      return creatorAuth.signOut().then(() => uid);
+    });
+}
+
 // state.isAdmin gates every mutating listener/render affordance — only the
 // admin can write; everyone else gets the same shared data read-only.
 let state = { isAdmin: false, currentUser: null };
@@ -945,6 +964,7 @@ function renderSettingsModal() {
     </div>
   `;
   body.querySelector('#settingsThemeBtn').addEventListener('click', toggleTheme);
+  body.querySelector('#addEmployeeBtn').addEventListener('click', openAddEmployeeForm);
   body.querySelectorAll('[data-toggle-employee]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.toggleEmployee;
@@ -955,6 +975,61 @@ function renderSettingsModal() {
         alert('Не удалось сохранить: проверьте соединение.');
       });
     });
+  });
+}
+
+function openAddEmployeeForm() {
+  const body = document.getElementById('settingsBody');
+  body.innerHTML = `
+    <div class="settings-section">
+      <div class="settings-section-title">Добавить сотрудника</div>
+      <form id="addEmployeeForm">
+        <input class="auth-input" type="text" id="empName" placeholder="Имя" required>
+        <select class="auth-input" id="empPosition">
+          <option value="admin_role">Администратор</option>
+          <option value="teacher" selected>Учитель</option>
+          <option value="accountant">Бухгалтер</option>
+          <option value="other">Другое</option>
+        </select>
+        <div style="display:flex; gap:8px;">
+          <span class="auth-input" style="flex:0 0 auto; display:flex; align-items:center; color:var(--text-muted);">+998</span>
+          <input class="auth-input" type="tel" id="empPhone" placeholder="901234567" required style="flex:1;">
+        </div>
+        <input class="auth-input" type="text" id="empPassword" placeholder="Пароль (по умолчанию — номер)">
+        <select class="auth-input" id="empRole">
+          <option value="viewer" selected>Просмотр</option>
+          <option value="admin">Админ</option>
+        </select>
+        <div id="addEmployeeError" class="auth-error hidden"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="submit" class="btn btn-primary">Добавить</button>
+          <button type="button" class="btn btn-secondary" id="cancelAddEmployee">Отмена</button>
+        </div>
+      </form>
+    </div>
+  `;
+  body.querySelector('#cancelAddEmployee').addEventListener('click', renderSettingsModal);
+  body.querySelector('#addEmployeeForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = body.querySelector('#empName').value.trim();
+    const position = body.querySelector('#empPosition').value;
+    const digits = '998' + body.querySelector('#empPhone').value.replace(/\D/g, '');
+    const password = body.querySelector('#empPassword').value.trim() || digits;
+    const role = body.querySelector('#empRole').value;
+    const errorEl = body.querySelector('#addEmployeeError');
+    errorEl.classList.add('hidden');
+    createEmployeeAccount(digits, password)
+      .then((uid) => db.collection('employees').doc(uid).set({
+        name, position, phone: digits, role, disabled: false, createdAt: Date.now(),
+      }))
+      .then(() => renderSettingsModal())
+      .catch((err) => {
+        console.error('create employee failed', err);
+        errorEl.textContent = err && err.code === 'auth/email-already-in-use'
+          ? 'Этот номер уже зарегистрирован.'
+          : 'Не удалось создать сотрудника: проверьте соединение.';
+        errorEl.classList.remove('hidden');
+      });
   });
 }
 
