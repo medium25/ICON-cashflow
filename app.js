@@ -874,6 +874,52 @@ function renderRowMenu() {
   });
 }
 
+// ---------- settings modal ----------
+
+let settingsModalEl = null;
+function ensureSettingsModal() {
+  if (!settingsModalEl) {
+    settingsModalEl = document.createElement('div');
+    settingsModalEl.className = 'modal-overlay hidden';
+    settingsModalEl.innerHTML = `
+      <div class="modal modal-lg">
+        <div class="modal-head">
+          <h2>Настройки</h2>
+          <button type="button" class="btn-icon" data-close-settings title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body" id="settingsBody"></div>
+      </div>
+    `;
+    document.body.appendChild(settingsModalEl);
+    settingsModalEl.addEventListener('click', (e) => {
+      if (e.target === settingsModalEl) closeSettings();
+    });
+    settingsModalEl.querySelector('[data-close-settings]').addEventListener('click', closeSettings);
+  }
+  return settingsModalEl;
+}
+function openSettings() {
+  ensureSettingsModal().classList.remove('hidden');
+  renderSettingsModal();
+}
+function closeSettings() {
+  if (settingsModalEl) settingsModalEl.classList.add('hidden');
+}
+function renderSettingsModal() {
+  const body = document.getElementById('settingsBody');
+  if (!body) return;
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  body.innerHTML = `
+    <div class="settings-section">
+      <div class="settings-section-title">Тема</div>
+      <button type="button" class="btn btn-secondary" id="settingsThemeBtn">
+        <span id="settingsThemeLabel">${dark ? 'Тёмная' : 'Светлая'}</span>
+      </button>
+    </div>
+  `;
+  body.querySelector('#settingsThemeBtn').addEventListener('click', toggleTheme);
+}
+
 function renderExpenseTable() {
   const rows = getRows();
   const tbody = document.getElementById('expenseTableBody');
@@ -1101,6 +1147,7 @@ function setupGlobalEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && openRowMenuId) { openRowMenuId = null; renderAll(); }
+    if (e.key === 'Escape' && settingsModalEl && !settingsModalEl.classList.contains('hidden')) closeSettings();
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
       const tag = e.target.tagName;
       // Leave native undo alone inside text fields (editing a comment,
@@ -1122,6 +1169,7 @@ function setupGlobalEvents() {
     newRowForm.classList.toggle('hidden');
     if (!newRowForm.classList.contains('hidden')) document.getElementById('newRowName').focus();
   });
+  document.getElementById('settingsBtn').addEventListener('click', openSettings);
   document.getElementById('newMonthBtn').addEventListener('click', () => {
     if (!confirm('Перейти к новому месяцу? «Отдали в этом месяце» обнулится для всех статей (история сохранится).')) return;
     startNewMonth();
@@ -1389,17 +1437,26 @@ function seedIfEmpty() {
   bumpDates(); // backdate to the 1st of the month so today's cards stay empty
 }
 
+// Shared by the corner theme button and the Settings modal's theme row —
+// both call this and each independently re-syncs its own label/text.
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('cf_theme', next);
+  syncThemeButtons();
+}
+function syncThemeButtons() {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const corner = document.getElementById('themeToggle');
+  if (corner) corner.textContent = dark ? '☀️' : '🌙';
+  const settingsLabel = document.getElementById('settingsThemeLabel');
+  if (settingsLabel) settingsLabel.textContent = dark ? 'Тёмная' : 'Светлая';
+}
 function initTheme() {
   const saved = localStorage.getItem('cf_theme') || 'light';
   document.documentElement.setAttribute('data-theme', saved);
-  const btn = document.getElementById('themeToggle');
-  btn.textContent = saved === 'dark' ? '☀️' : '🌙';
-  btn.addEventListener('click', () => {
-    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('cf_theme', next);
-    btn.textContent = next === 'dark' ? '☀️' : '🌙';
-  });
+  syncThemeButtons();
+  document.getElementById('themeToggle').addEventListener('click', toggleTheme);
 }
 
 // ---------- auth ----------
