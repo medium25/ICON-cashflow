@@ -933,7 +933,12 @@ function openSettings() {
 function closeSettings() {
   if (settingsModalEl) settingsModalEl.classList.add('hidden');
 }
-const POSITION_LABELS = { admin_role: 'Администратор', teacher: 'Учитель', accountant: 'Бухгалтер', other: 'Другое' };
+const POSITION_LABELS = { ceo: 'CEO', manager: 'Менеджер', finance: 'Финансист', accountant: 'Бухгалтер' };
+function positionOptionsHtml(selected) {
+  return Object.entries(POSITION_LABELS)
+    .map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`)
+    .join('');
+}
 
 function renderSettingsModal() {
   const body = document.getElementById('settingsBody');
@@ -946,7 +951,10 @@ function renderSettingsModal() {
             <span class="employee-name">${escapeHtml(emp.name || 'Без имени')}</span>
             <span class="employee-meta">${escapeHtml(POSITION_LABELS[emp.position] || emp.position || '')} · +${escapeHtml(emp.phone || '')} · ${emp.role === 'admin' ? 'Админ' : 'Просмотр'}</span>
           </div>
-          <button type="button" class="btn btn-secondary" data-toggle-employee="${emp.id}">${emp.disabled ? 'Включить' : 'Отключить'}</button>
+          <div class="employee-actions">
+            <button type="button" class="btn-icon" data-edit-employee="${emp.id}" title="Редактировать">✎</button>
+            <button type="button" class="btn btn-secondary" data-toggle-employee="${emp.id}">${emp.disabled ? 'Включить' : 'Отключить'}</button>
+          </div>
         </div>
       `).join('')
     : '<div class="empty-hint">Пока нет сотрудников</div>';
@@ -976,6 +984,12 @@ function renderSettingsModal() {
       });
     });
   });
+  body.querySelectorAll('[data-edit-employee]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const emp = employeesCache.find((x) => x.id === btn.dataset.editEmployee);
+      if (emp) openEditEmployeeForm(emp);
+    });
+  });
 }
 
 function openAddEmployeeForm() {
@@ -985,15 +999,10 @@ function openAddEmployeeForm() {
       <div class="settings-section-title">Добавить сотрудника</div>
       <form id="addEmployeeForm">
         <input class="auth-input" type="text" id="empName" placeholder="Имя" required>
-        <select class="auth-input" id="empPosition">
-          <option value="admin_role">Администратор</option>
-          <option value="teacher" selected>Учитель</option>
-          <option value="accountant">Бухгалтер</option>
-          <option value="other">Другое</option>
-        </select>
-        <div style="display:flex; gap:8px;">
-          <span class="auth-input" style="flex:0 0 auto; display:flex; align-items:center; color:var(--text-muted);">+998</span>
-          <input class="auth-input" type="tel" id="empPhone" placeholder="901234567" required style="flex:1;">
+        <select class="auth-input" id="empPosition">${positionOptionsHtml('manager')}</select>
+        <div class="phone-input-row">
+          <span class="phone-prefix">+998</span>
+          <input class="auth-input" type="tel" id="empPhone" placeholder="901234567" required>
         </div>
         <input class="auth-input" type="text" id="empPassword" placeholder="Пароль (по умолчанию — номер)">
         <select class="auth-input" id="empRole">
@@ -1028,6 +1037,55 @@ function openAddEmployeeForm() {
         errorEl.textContent = err && err.code === 'auth/email-already-in-use'
           ? 'Этот номер уже зарегистрирован.'
           : 'Не удалось создать сотрудника: проверьте соединение.';
+        errorEl.classList.remove('hidden');
+      });
+  });
+}
+
+// Firebase Auth's client SDK can only change the PASSWORD/EMAIL of the
+// currently-signed-in user, never another account's — so unlike name/
+// position/role (plain Firestore fields, freely editable here), the phone
+// number and password can't be changed for an existing employee from this
+// admin session at all. Shown read-only with a note instead of pretending
+// they're editable.
+function openEditEmployeeForm(emp) {
+  const body = document.getElementById('settingsBody');
+  body.innerHTML = `
+    <div class="settings-section">
+      <div class="settings-section-title">Редактировать сотрудника</div>
+      <form id="editEmployeeForm">
+        <input class="auth-input" type="text" id="editEmpName" placeholder="Имя" required value="${escapeHtml(emp.name || '')}">
+        <select class="auth-input" id="editEmpPosition">${positionOptionsHtml(emp.position)}</select>
+        <div class="phone-input-row">
+          <span class="phone-prefix">+998</span>
+          <span class="auth-input phone-readonly">${escapeHtml((emp.phone || '').replace(/^998/, ''))}</span>
+        </div>
+        <select class="auth-input" id="editEmpRole">
+          <option value="viewer" ${emp.role !== 'admin' ? 'selected' : ''}>Просмотр</option>
+          <option value="admin" ${emp.role === 'admin' ? 'selected' : ''}>Админ</option>
+        </select>
+        <div class="modal-hint" style="padding:0 0 10px;">Телефон и пароль нельзя изменить здесь — отключите сотрудника и заведите нового с новым номером, если нужно сменить вход.</div>
+        <div id="editEmployeeError" class="auth-error hidden"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+          <button type="button" class="btn btn-secondary" id="cancelEditEmployee">Отмена</button>
+        </div>
+      </form>
+    </div>
+  `;
+  body.querySelector('#cancelEditEmployee').addEventListener('click', renderSettingsModal);
+  body.querySelector('#editEmployeeForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = body.querySelector('#editEmpName').value.trim();
+    const position = body.querySelector('#editEmpPosition').value;
+    const role = body.querySelector('#editEmpRole').value;
+    const errorEl = body.querySelector('#editEmployeeError');
+    errorEl.classList.add('hidden');
+    db.collection('employees').doc(emp.id).update({ name, position, role })
+      .then(() => renderSettingsModal())
+      .catch((err) => {
+        console.error('edit employee failed', err);
+        errorEl.textContent = 'Не удалось сохранить: проверьте соединение.';
         errorEl.classList.remove('hidden');
       });
   });

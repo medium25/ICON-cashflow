@@ -1113,3 +1113,24 @@ body::before {
 .employee-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .employee-name { font-weight: 600; font-size: 14px; }
 .employee-meta { font-size: 12px; color: var(--text-muted); }
+.employee-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Two boxes in a row ("+998" prefix + the number) — .auth-input's own
+   width:100% fights a plain inline flex:1 (both fought to be 100% of the
+   row), which is what made the number box overflow the modal. Overriding
+   width via this more specific selector, instead of reusing .auth-input
+   unmodified on the prefix box too, is what actually fixes it. */
+.phone-input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.phone-prefix {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-tint);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.phone-input-row .auth-input { flex: 1; width: auto; margin-bottom: 0; }
+.phone-readonly { flex: 1; width: auto; margin-bottom: 0; display: flex; align-items: center; color: var(--text-muted); }
