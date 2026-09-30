@@ -30,6 +30,17 @@ const METHOD_PHRASE = { 'Наличка': 'в наличке', 'Click': 'в Clic
 const fmt = (n) => Math.round(n || 0).toLocaleString('ru-RU');
 const fmtSigned = (n) => n > 0 ? `-${fmt(n)}` : '—';
 const todayStr = () => new Date().toISOString().slice(0, 10);
+const tsDateStr = (ts) => new Date(ts).toISOString().slice(0, 10);
+
+// A soft-deleted record should only vanish from sums for the day it was
+// deleted on (and any day after) — not from days being viewed further back
+// in history. Without this, deleting a mis-entered expense today silently
+// rewrote "Отдали в этом месяце" for every past day that already counted it,
+// which is exactly the "почему прошлое изменилось" complaint.
+function activeAsOf(record, asOfDate) {
+  if (!record.deleted) return true;
+  return !record.deletedAt || tsDateStr(record.deletedAt) > asOfDate;
+}
 
 // The date the whole page is currently showing. Defaults to today and only
 // ever changes via the date picker (initDatePicker) — never persisted, so a
@@ -99,6 +110,49 @@ function allDataLoaded() {
   return snapshotsLoaded.rows && snapshotsLoaded.expenses && snapshotsLoaded.balances;
 }
 
+// Undo (Cmd/Ctrl+Z), up to UNDO_STACK_LIMIT steps back — save()/
+// saveBalanceEntry() are the only two places any mutation passes through, so
+// pushing "what it looked like right before this write" there would seem to
+// cover every action for free — except most mutators fetch the live CACHE
+// array/object and mutate it BY REFERENCE (list.push(...), row.comment = x,
+// entry.sources.push(...)) before ever calling save(), so by the time save()
+// reads CACHE[cacheKey] as "previous" it's already the post-mutation value
+// (same object). Mutators that build a fresh array instead (deleteRow's
+// .filter()) don't have this problem — CACHE is only reassigned inside
+// save() itself, so its own pre-reassignment read is genuinely "before". For
+// everything else, the mutator must snapshot before it touches anything;
+// these three helpers do that, and save()/saveBalanceEntry() prefer that
+// snapshot when present. suppressUndoCapture stops an undo's own write from
+// pushing itself back onto the stack, so repeated Cmd+Z walks further back
+// each time instead of just toggling the last two states.
+const UNDO_STACK_LIMIT = 20;
+let undoStack = [];
+let pendingUndoSnapshot = null;
+let suppressUndoCapture = false;
+function snapshotExpensesForUndo() {
+  pendingUndoSnapshot = { kind: 'full', key: STORAGE.expenses, previous: JSON.parse(JSON.stringify(CACHE.expenses)) };
+}
+function snapshotRowsForUndo() {
+  pendingUndoSnapshot = { kind: 'full', key: STORAGE.rows, previous: JSON.parse(JSON.stringify(CACHE.rows)) };
+}
+function snapshotBalanceForUndo(method, date) {
+  const existing = CACHE.balances[`${method}_${date}`];
+  pendingUndoSnapshot = { kind: 'balance', method, date, previous: existing ? JSON.parse(JSON.stringify(existing)) : null };
+}
+function pushUndo(entry) {
+  if (suppressUndoCapture) return;
+  undoStack.push(entry);
+  if (undoStack.length > UNDO_STACK_LIMIT) undoStack.shift();
+}
+function undoLast() {
+  const undo = undoStack.pop();
+  if (!undo) return;
+  suppressUndoCapture = true;
+  if (undo.kind === 'full') save(undo.key, undo.previous);
+  else saveBalanceEntry(undo.method, undo.date, undo.previous);
+  suppressUndoCapture = false;
+}
+
 function countOf(value) {
   if (Array.isArray(value)) return value.length;
   if (value && typeof value === 'object') return Object.keys(value).length;
@@ -134,7 +188,13 @@ function save(key, value) {
     alert('Данные ещё загружаются. Подождите пару секунд и повторите.');
     return;
   }
-  const previous = CACHE[cacheKey];
+  // Prefer the caller's pre-mutation snapshot (see snapshotExpensesForUndo/
+  // snapshotRowsForUndo) when there is one for this exact key — CACHE[cacheKey]
+  // itself may already be the post-mutation value if the caller mutated it
+  // by reference before calling save().
+  const snapshot = pendingUndoSnapshot && pendingUndoSnapshot.kind === 'full' && pendingUndoSnapshot.key === key ? pendingUndoSnapshot : null;
+  pendingUndoSnapshot = null;
+  const previous = snapshot ? snapshot.previous : CACHE[cacheKey];
   if (isSuspiciousShrink(previous, value)) {
     const before = countOf(previous), after = countOf(value);
     if (!confirm(`Это действие уменьшит «${cacheKey}» с ${before} до ${after} записей — заметно больше, чем обычно удаляется за раз. Точно продолжить?`)) {
@@ -142,6 +202,7 @@ function save(key, value) {
       return;
     }
   }
+  pushUndo({ kind: 'full', key, previous: JSON.parse(JSON.stringify(previous)) });
   backupPreviousValue(cacheKey, previous);
   CACHE[cacheKey] = value;
   db.collection('cashflow').doc(cacheKey).set({ data: value }).catch((err) => {
@@ -177,7 +238,7 @@ function hasEarlierActivity(method, date) {
   const prefix = `${method}_`;
   const hasBalanceEntry = Object.keys(balances).some(k => k.startsWith(prefix) && k.slice(prefix.length) < date);
   if (hasBalanceEntry) return true;
-  return getExpenses().some(e => e.method === method && e.date < date && !e.deleted);
+  return getExpenses().some(e => e.method === method && e.date < date && activeAsOf(e, date));
 }
 
 // getBalanceEntry recurses through every day back to the last saved entry,
@@ -212,6 +273,12 @@ function getBalanceEntry(method, date) {
 function saveBalanceEntry(method, date, entry) {
   const key = `${method}_${date}`;
   const balances = getBalances();
+  // Same "snapshot before mutation" concern as save() — setWas/addSource/etc.
+  // mutate the live balance entry by reference before calling this.
+  const snapshot = pendingUndoSnapshot && pendingUndoSnapshot.kind === 'balance' && pendingUndoSnapshot.method === method && pendingUndoSnapshot.date === date ? pendingUndoSnapshot : null;
+  pendingUndoSnapshot = null;
+  const previous = snapshot ? snapshot.previous : balances[key];
+  pushUndo({ kind: 'balance', method, date, previous: previous ? JSON.parse(JSON.stringify(previous)) : null });
   balances[key] = entry;
   if (!allDataLoaded()) {
     console.error('Blocked saveBalanceEntry() before initial data finished loading');
@@ -237,18 +304,21 @@ function saveBalanceEntry(method, date, entry) {
   renderCurrentPage();
 }
 function setWas(method, date, was) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   entry.was = was;
   entry.wasTs = Date.now();
   saveBalanceEntry(method, date, entry);
 }
 function setIncome(method, date, income) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   entry.income = income;
   entry.incomeTs = Date.now();
   saveBalanceEntry(method, date, entry);
 }
 function addSource(method, date, label, amount) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   entry.sources.push({ id: uid(), label, amount, ts: Date.now(), comment: '', deleted: false });
   saveBalanceEntry(method, date, entry);
@@ -256,11 +326,19 @@ function addSource(method, date, label, amount) {
 // soft delete — the record stays (with a deletedAt stamp) so История can
 // still show it, struck through, instead of just vanishing
 function removeSource(method, date, id) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   const s = entry.sources.find(x => x.id === id);
   if (s) { s.deleted = true; s.deletedAt = Date.now(); saveBalanceEntry(method, date, entry); }
 }
+function restoreSource(method, date, id) {
+  snapshotBalanceForUndo(method, date);
+  const entry = getBalanceEntry(method, date);
+  const s = entry.sources.find(x => x.id === id);
+  if (s) { s.deleted = false; s.deletedAt = null; saveBalanceEntry(method, date, entry); }
+}
 function setSourceComment(method, date, id, comment) {
+  snapshotBalanceForUndo(method, date);
   const entry = getBalanceEntry(method, date);
   const s = entry.sources.find(x => x.id === id);
   if (s) { s.comment = comment; saveBalanceEntry(method, date, entry); }
@@ -269,13 +347,13 @@ function setSourceComment(method, date, id, comment) {
 // ---------- calculations ----------
 
 function expensesFor(method, date) {
-  return getExpenses().filter(e => e.method === method && e.date === date && !e.deleted);
+  return getExpenses().filter(e => e.method === method && e.date === date && activeAsOf(e, date));
 }
 function categorySum(method, date) {
   return expensesFor(method, date).reduce((s, e) => s + e.amount, 0);
 }
 function sourcesSum(method, date) {
-  return getBalanceEntry(method, date).sources.filter(s => !s.deleted).reduce((s, x) => s + x.amount, 0);
+  return getBalanceEntry(method, date).sources.filter(s => activeAsOf(s, date)).reduce((s, x) => s + x.amount, 0);
 }
 function methodNewIncome(method, date) {
   const entry = getBalanceEntry(method, date);
@@ -339,7 +417,7 @@ function updateLiveKpis() {
 // how much a given debt-row name was paid today, across all 3 methods
 function paidTodayByName(name, date) {
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date === date && !e.deleted)
+    .filter(e => e.name.trim() === name.trim() && e.date === date && activeAsOf(e, date))
     .reduce((s, e) => s + e.amount, 0);
 }
 // How much a given debt-row name has been paid since the last "Новый
@@ -351,28 +429,32 @@ function paidTodayByName(name, date) {
 // with no click leaves it exactly as it was.
 function paidThisMonthByName(name, asOfDate) {
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && !e.deleted)
+    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && activeAsOf(e, asOfDate))
     .reduce((s, e) => s + e.amount, 0);
 }
 
 // ---------- mutations ----------
 
 function addRow(name, due, payDate, comment) {
+  snapshotRowsForUndo();
   const rows = getRows();
   rows.push({ id: uid(), name, due, payDate: payDate || '', comment: comment || '' });
   save(STORAGE.rows, rows);
 }
 function editRow(id, name, due, payDate) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const row = rows.find(r => r.id === id);
   if (row) { row.name = name; row.due = due; row.payDate = payDate || ''; save(STORAGE.rows, rows); }
 }
 function setRowComment(id, comment) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const row = rows.find(r => r.id === id);
   if (row) { row.comment = comment; save(STORAGE.rows, rows); }
 }
 function toggleRowDebt(id) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const row = rows.find(r => r.id === id);
   if (row) { row.isDebt = !row.isDebt; save(STORAGE.rows, rows); }
@@ -383,11 +465,13 @@ function deleteRow(id) {
 // "Новый месяц" — soft-deletes every active expense so "Отдали в этом месяце"
 // zeroes out for all rows, while История still keeps the full record
 function startNewMonth() {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   list.forEach(e => { if (!e.deleted) { e.deleted = true; e.deletedAt = Date.now(); } });
   save(STORAGE.expenses, list);
 }
 function moveRow(id, toIndex) {
+  snapshotRowsForUndo();
   const rows = getRows();
   const fromIndex = rows.findIndex(r => r.id === id);
   if (fromIndex === -1) return;
@@ -398,22 +482,32 @@ function moveRow(id, toIndex) {
 // date defaults to today for the fix-month/seed callers, which never pass
 // one; the category-add form (renderMethods) passes the day being viewed.
 function addExpense(method, name, amount, date = todayStr()) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   list.push({ id: uid(), method, name, amount, checked: false, date, ts: Date.now(), comment: '', deleted: false });
   save(STORAGE.expenses, list);
 }
 function toggleExpense(id) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.checked = !e.checked; save(STORAGE.expenses, list); }
 }
 // soft delete — kept (struck through) in История instead of disappearing
 function deleteExpense(id) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.deleted = true; e.deletedAt = Date.now(); save(STORAGE.expenses, list); }
 }
+function restoreExpense(id) {
+  snapshotExpensesForUndo();
+  const list = getExpenses();
+  const e = list.find(x => x.id === id);
+  if (e) { e.deleted = false; e.deletedAt = null; save(STORAGE.expenses, list); }
+}
 function setExpenseComment(id, comment) {
+  snapshotExpensesForUndo();
   const list = getExpenses();
   const e = list.find(x => x.id === id);
   if (e) { e.comment = comment; save(STORAGE.expenses, list); }
@@ -922,9 +1016,9 @@ function collectAllTransactions() {
     const entry = balances[key];
     if (entry.was) items.push({ kind: 'income', method, date, label: 'Было', amount: entry.was, ts: entry.wasTs });
     if (entry.income) items.push({ kind: 'income', method, date, label: 'Поступило', amount: entry.income, ts: entry.incomeTs });
-    (entry.sources || []).filter(s => !s.deleted).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts }));
+    (entry.sources || []).forEach(s => items.push({ kind: 'income', method, date, label: s.label, amount: s.amount, ts: s.ts, deleted: s.deleted, sourceId: s.id }));
   });
-  getExpenses().filter(e => !e.deleted).forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts }));
+  getExpenses().forEach(e => items.push({ kind: 'expense', method: e.method, date: e.date, label: e.name, amount: e.amount, ts: e.ts, deleted: e.deleted, expenseId: e.id }));
   return items;
 }
 
@@ -966,17 +1060,26 @@ function renderHistoryPage() {
   container.innerHTML = dates.map(date => {
     const dayItems = byDate[date].slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
     const cards = dayItems.map(it => `
-      <div class="history-card">
+      <div class="history-card ${it.deleted ? 'deleted' : ''}">
         <div class="history-card-top">
           <span class="history-method">${it.kind === 'income' ? 'Доход' : 'Расход'} ${escapeHtml(it.method)}</span>
           <span class="history-name">${escapeHtml(it.label || '—')}</span>
           <span class="history-amount ${it.kind === 'income' ? 'amount-pos' : 'amount-neg'}">${it.kind === 'income' ? '+' : '-'}${fmt(it.amount)}</span>
+          ${it.deleted && state.isAdmin ? `<button type="button" class="btn-icon history-restore" title="Восстановить" data-restore-expense="${it.expenseId || ''}" data-restore-source="${it.sourceId || ''}" data-restore-method="${it.method}" data-restore-date="${it.date}">↺</button>` : ''}
         </div>
-        <div class="history-meta">${timeLabel(it.ts)}</div>
+        <div class="history-meta">${timeLabel(it.ts)}${it.deleted ? ' · удалено' : ''}</div>
       </div>
     `).join('');
     return `<div class="history-day"><div class="history-day-label">${dateLabel(date)}</div>${cards}</div>`;
   }).join('');
+
+  container.querySelectorAll('[data-restore-expense], [data-restore-source]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.restoreExpense) restoreExpense(btn.dataset.restoreExpense);
+      else restoreSource(btn.dataset.restoreMethod, btn.dataset.restoreDate, btn.dataset.restoreSource);
+      renderHistoryPage();
+    });
+  });
 }
 
 // ---------- utils ----------
@@ -998,6 +1101,15 @@ function setupGlobalEvents() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && openRowMenuId) { openRowMenuId = null; renderAll(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      const tag = e.target.tagName;
+      // Leave native undo alone inside text fields (editing a comment,
+      // typing a new row's name, etc.) — only step in for the app-level
+      // "undo my last save" when nothing is mid-edit.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+      e.preventDefault();
+      undoLast();
+    }
   });
   document.addEventListener('click', (e) => {
     if (openRowMenuId && !e.target.closest('.row-menu') && !e.target.closest('[data-row-menu-toggle]')) {
