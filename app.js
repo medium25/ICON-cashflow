@@ -1390,61 +1390,65 @@ function initTheme() {
 
 // ---------- auth ----------
 
-let authMode = 'login'; // 'login' | 'register'
+let authLoginMode = 'email'; // 'email' | 'phone'
 let authError = '';
 
-function mapAuthError(err) {
+// Employee accounts don't get a real email — this is how their phone
+// number becomes one, so ordinary Firebase email+password auth handles
+// them unmodified. Same function used at login and at employee creation,
+// so both sides always agree on the address.
+function phoneDigitsToEmail(digits) {
+  return `${digits}@employees.icon-finance.local`;
+}
+
+function mapAuthError(err, mode) {
+  const noun = mode === 'phone' ? 'телефон' : 'почта';
   switch (err && err.code) {
-    case 'auth/email-already-in-use': return 'Этот email уже зарегистрирован. Войдите.';
-    case 'auth/invalid-email': return 'Введите корректную почту.';
-    case 'auth/weak-password': return 'Пароль должен быть не короче 6 символов.';
+    case 'auth/invalid-email': return mode === 'phone' ? 'Введите номер телефона.' : 'Введите корректную почту.';
     case 'auth/user-not-found':
     case 'auth/wrong-password':
-    case 'auth/invalid-credential': return 'Неверная почта или пароль.';
+    case 'auth/invalid-credential': return `Неверн${mode === 'phone' ? 'ый' : 'ая'} ${noun} или пароль.`;
     default: return 'Что-то пошло не так. Попробуйте ещё раз.';
   }
 }
 
 function renderAuthForm() {
   const gate = document.getElementById('authGate');
-  const isLogin = authMode === 'login';
+  const isPhone = authLoginMode === 'phone';
   gate.innerHTML = `
     <div class="panel auth-wrap">
-      <div class="auth-title">${isLogin ? 'Вход' : 'Регистрация'}</div>
+      <div class="auth-title">Вход</div>
+      <div class="modal-tabs">
+        <button type="button" class="modal-tab ${!isPhone ? 'active' : ''}" data-login-mode="email">Email</button>
+        <button type="button" class="modal-tab ${isPhone ? 'active' : ''}" data-login-mode="phone">Телефон</button>
+      </div>
       <form id="authForm">
-        <input class="auth-input" type="email" id="authEmail" placeholder="Электронная почта" required>
+        ${isPhone
+          ? '<input class="auth-input" type="tel" id="authPhone" placeholder="+998 90 123 45 67" required>'
+          : '<input class="auth-input" type="email" id="authEmail" placeholder="Электронная почта" required>'}
         <input class="auth-input" type="password" id="authPassword" placeholder="Пароль" required>
-        ${isLogin ? '' : '<input class="auth-input" type="password" id="authPassword2" placeholder="Повторите пароль" required>'}
         ${authError ? `<div class="auth-error">${escapeHtml(authError)}</div>` : ''}
-        <button type="submit" class="btn btn-primary" style="width:100%;">${isLogin ? 'Войти' : 'Создать аккаунт'}</button>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Войти</button>
       </form>
-      <div class="auth-toggle">${isLogin
-        ? 'Нет аккаунта? <a id="authToggle">Зарегистрироваться</a>'
-        : 'Уже есть аккаунт? <a id="authToggle">Войти</a>'}</div>
     </div>
   `;
-  gate.querySelector('#authToggle').addEventListener('click', () => {
-    authMode = isLogin ? 'register' : 'login';
-    authError = '';
-    renderAuthForm();
+  gate.querySelectorAll('[data-login-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      authLoginMode = btn.dataset.loginMode;
+      authError = '';
+      renderAuthForm();
+    });
   });
   gate.querySelector('#authForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    const email = gate.querySelector('#authEmail').value.trim();
     const password = gate.querySelector('#authPassword').value;
-    if (isLogin) {
-      auth.signInWithEmailAndPassword(email, password).catch((err) => {
-        authError = mapAuthError(err);
-        renderAuthForm();
-      });
-    } else {
-      const password2 = gate.querySelector('#authPassword2').value;
-      if (password !== password2) { authError = 'Пароли не совпадают.'; renderAuthForm(); return; }
-      auth.createUserWithEmailAndPassword(email, password).catch((err) => {
-        authError = mapAuthError(err);
-        renderAuthForm();
-      });
-    }
+    const identifier = isPhone
+      ? phoneDigitsToEmail('998' + gate.querySelector('#authPhone').value.replace(/\D/g, '').replace(/^998/, ''))
+      : gate.querySelector('#authEmail').value.trim();
+    auth.signInWithEmailAndPassword(identifier, password).catch((err) => {
+      authError = mapAuthError(err, authLoginMode);
+      renderAuthForm();
+    });
   });
 }
 
