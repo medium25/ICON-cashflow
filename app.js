@@ -1216,6 +1216,20 @@ function renderViewDateConfirm() {
   }
 }
 
+function initLogoutButton() {
+  const btn = document.getElementById('logoutBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    // Reload after sign-out instead of hand-rolling the reset — enterApp()
+    // only wires up mutating listeners once per page load
+    // (onAuthStateChanged's `if (state.currentUser) return;` guard, further
+    // down this file, is there specifically to stop that from double-firing)
+    // and unwinding CACHE/state back to their pre-login shape correctly
+    // isn't worth it next to a full reload.
+    auth.signOut().then(() => location.reload());
+  });
+}
+
 function initDatePicker() {
   const input = document.getElementById('viewDateInput');
   const todayBtn = document.getElementById('viewDateTodayBtn');
@@ -1523,6 +1537,7 @@ function enterApp(authUid, isAdmin) {
     document.getElementById('authGate').classList.add('hidden');
     const app = document.getElementById('app');
     if (app) app.classList.remove('hidden');
+    initLogoutButton();
     if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); setupGlobalEvents(); }
   });
 }
@@ -1530,15 +1545,32 @@ function enterApp(authUid, isAdmin) {
 document.getElementById('authGate').innerHTML = '<div class="auth-wrap empty-hint" style="text-align:center;">Загрузка…</div>';
 document.getElementById('authGate').classList.remove('hidden');
 
+// Resolves who signed in to: 'admin' (in the admins collection), an
+// employee doc (role + disabled), or nothing at all (stale/unknown
+// account — treated the same as disabled).
+function resolveAccess(uid) {
+  return db.collection('admins').doc(uid).get().then((adminDoc) => {
+    if (adminDoc.exists) return { allowed: true, isAdmin: true };
+    return db.collection('employees').doc(uid).get().then((empDoc) => {
+      if (!empDoc.exists || empDoc.data().disabled) return { allowed: false };
+      return { allowed: true, isAdmin: empDoc.data().role === 'admin' };
+    });
+  });
+}
+
 auth.onAuthStateChanged((user) => {
   if (state.currentUser) return; // already entered via enterApp() above
   if (!user) { showAuthGate(); return; }
-  db.collection('admins').doc(user.uid).get()
-    .then((adminDoc) => enterApp(user.uid, adminDoc.exists))
-    .catch(() => {
-      authError = 'Не удалось загрузить данные. Проверьте соединение.';
-      showAuthGate();
-    });
+  resolveAccess(user.uid).then((access) => {
+    if (!access.allowed) {
+      authError = 'Аккаунт отключён или не найден.';
+      return auth.signOut().then(() => showAuthGate());
+    }
+    enterApp(user.uid, access.isAdmin);
+  }).catch(() => {
+    authError = 'Не удалось загрузить данные. Проверьте соединение.';
+    showAuthGate();
+  });
 });
 
 if (document.getElementById('themeToggle')) initTheme();
