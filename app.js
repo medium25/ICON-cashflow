@@ -266,6 +266,12 @@ function monthYearLabel(dateStr) {
 function periodLowerBound(asOfDate) {
   let bound = null;
   getPeriods().forEach((p) => {
+    // Backfilled archive entries (e.g. filling in July/August after the
+    // fact, from data that already existed before "Новый месяц" ever had
+    // this archiving behavior) are browsable in Архив but must never shift
+    // where the *live* table's "Отдали в этом месяце" starts counting from
+    // — only an actual "Новый месяц" click should do that.
+    if (p.retroactive) return;
     if (p.closedAt < asOfDate && (!bound || p.closedAt > bound)) bound = p.closedAt;
   });
   return bound ? addDays(bound, 1) : null;
@@ -943,7 +949,7 @@ function ensureArchiveModal() {
     archiveModalEl = document.createElement('div');
     archiveModalEl.className = 'modal-overlay hidden';
     archiveModalEl.innerHTML = `
-      <div class="modal modal-lg">
+      <div class="modal modal-lg modal-solid">
         <div class="modal-head">
           <h2>Архив</h2>
           <button type="button" class="btn-icon" data-close-archive title="Закрыть">✕</button>

@@ -137,6 +137,11 @@ body::before {
   overflow: hidden;
 }
 .modal.modal-lg { max-width: 680px; }
+.modal.modal-solid {
+  background: var(--surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 .modal-head {
   display: flex;
   align-items: center;
