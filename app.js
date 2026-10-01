@@ -816,7 +816,7 @@ function renderRow(r) {
       <td class="drag-col">${canEditRows ? `<span class="drag-handle" draggable="true" title="Перетащить">⋮⋮</span>` : ''}</td>
       <td class="date-cell">${escapeHtml(r.payDate || '—')}</td>
       <td>${r.isDebt ? `<span class="debt-dot" title="Долг"></span>` : ''}${escapeHtml(r.name)}${r.comment ? `<span class="info-icon" data-view-comment="${r.id}" title="${escapeHtml(r.comment)}">i</span>` : ''}</td>
-      <td class="num due-cell">${fmt(r.due)}</td>
+      <td class="num due-cell" ${canEditRows ? `data-due-cell="${r.id}"` : ''}>${fmt(r.due)}</td>
       <td class="num today-cell">${fmtSigned(today)}</td>
       <td class="num month-cell">${fmt(monthPaid)}</td>
       <td class="num"><span class="diff-value ${diffClass}">${fmt(diff)}</span></td>
@@ -1155,6 +1155,39 @@ function renderExpenseTable() {
       const id = btn.dataset.rowMenuToggle;
       openRowMenuId = openRowMenuId === id ? null : id;
       renderAll();
+    });
+  });
+
+  // Double-click "Должны" to edit it inline — confirm() gates the actual
+  // write so a stray double-click (or an accidental Enter/blur with the
+  // value unchanged) can't silently change a debt amount.
+  tbody.querySelectorAll('[data-due-cell]').forEach(cell => {
+    cell.addEventListener('dblclick', () => {
+      const id = cell.dataset.dueCell;
+      const row = rows.find(r => r.id === id);
+      if (!row) return;
+      const oldValue = row.due;
+      cell.innerHTML = `<input type="text" inputmode="numeric" class="due-edit-input" data-amount value="${fmt(oldValue)}">`;
+      const input = cell.querySelector('input');
+      input.focus();
+      input.select();
+      let settled = false;
+      const finish = (attemptCommit) => {
+        if (settled) return;
+        settled = true;
+        if (attemptCommit) {
+          const newValue = parseAmount(input);
+          if (newValue !== oldValue && confirm(`Изменить «Должны» для «${row.name}» с ${fmt(oldValue)} на ${fmt(newValue)}?`)) {
+            editRow(row.id, row.name, newValue, row.payDate);
+          }
+        }
+        renderAll();
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      input.addEventListener('blur', () => finish(true));
     });
   });
 

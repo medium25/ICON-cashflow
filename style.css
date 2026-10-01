@@ -798,6 +798,20 @@ body::before {
 
 .expense-table td.num, .debt-summary-table td.num { font-weight: 700; }
 .due-cell { color: var(--text); }
+.due-cell[data-due-cell] { cursor: pointer; border-radius: var(--radius-sm); }
+.due-cell[data-due-cell]:hover { background: var(--surface-tint); }
+.due-edit-input {
+  width: 100%;
+  font: inherit;
+  font-weight: 700;
+  text-align: right;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+.due-edit-input:focus { outline: none; }
 .date-cell { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 .info-icon {
   display: inline-flex;
