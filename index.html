@@ -59,7 +59,7 @@
       <h2>Наименования</h2>
       <div class="panel-head-actions">
         <a href="history.html" class="btn btn-secondary">История</a>
-        <button id="archiveBtn" class="btn btn-secondary">📁 Архив</button>
+        <a href="archive.html" class="btn btn-secondary">📁 Архив</a>
         <button id="settingsBtn" class="btn btn-secondary admin-only">⚙ Настройки</button>
         <button id="newMonthBtn" class="btn btn-secondary admin-only">Перейти к новому месяцу</button>
         <button id="toggleAddRow" class="btn btn-secondary admin-only">+ Добавить</button>
@@ -118,6 +118,12 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
-<script src="app.js?v=14"></script>
+<!-- PDF export for "Перейти к новому месяцу" — html2canvas renders the
+     closed-month table (with real Cyrillic text) to an image, jsPDF embeds
+     that image into a downloadable PDF. jsPDF's own built-in fonts don't
+     support Cyrillic at all, hence going through an image instead. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

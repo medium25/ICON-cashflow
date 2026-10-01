@@ -534,6 +534,7 @@ function startNewMonth() {
   });
   const entry = { id: uid(), label: monthYearLabel(today), closedAt: today, snapshot };
   save(STORAGE.periods, [...getPeriods(), entry]);
+  return entry;
 }
 function moveRow(id, toIndex) {
   snapshotRowsForUndo();
@@ -939,44 +940,86 @@ function renderRowMenu() {
   });
 }
 
-// ---------- archive modal ----------
-// Read-only — visible to everyone (same level as История), not gated
-// behind state.isAdmin like Settings/Новый месяц are.
-
-let archiveModalEl = null;
-function ensureArchiveModal() {
-  if (!archiveModalEl) {
-    archiveModalEl = document.createElement('div');
-    archiveModalEl.className = 'modal-overlay hidden';
-    archiveModalEl.innerHTML = `
-      <div class="modal modal-lg modal-solid">
-        <div class="modal-head">
-          <h2>Архив</h2>
-          <button type="button" class="btn-icon" data-close-archive title="Закрыть">✕</button>
-        </div>
-        <div class="modal-body" id="archiveBody"></div>
-      </div>
-    `;
-    document.body.appendChild(archiveModalEl);
-    archiveModalEl.addEventListener('click', (e) => {
-      if (e.target === archiveModalEl) closeArchive();
-    });
-    archiveModalEl.querySelector('[data-close-archive]').addEventListener('click', closeArchive);
+// ---------- PDF export (on "Новый месяц" close) ----------
+// jsPDF's built-in fonts have no Cyrillic glyphs at all, so the table is
+// built as real HTML (correct Cyrillic via the normal page font) and
+// rasterized with html2canvas first — the PDF just embeds that image,
+// sidestepping the font problem entirely. Sliced across pages if the
+// table is taller than one.
+function downloadMonthPdf(label, snapshot) {
+  if (typeof html2canvas === 'undefined' || !window.jspdf) {
+    console.error('PDF libraries failed to load');
+    alert('Не удалось создать PDF (библиотеки не загрузились) — Архив всё равно сохранён.');
+    return;
   }
-  return archiveModalEl;
+  const rows = snapshot.length
+    ? snapshot.map((r) => `
+        <tr>
+          <td style="padding:6px 8px; border:1px solid #ccc;">${escapeHtml(r.payDate || '—')}</td>
+          <td style="padding:6px 8px; border:1px solid #ccc;">${escapeHtml(r.name)}</td>
+          <td style="padding:6px 8px; border:1px solid #ccc; text-align:right;">${fmt(r.due)}</td>
+          <td style="padding:6px 8px; border:1px solid #ccc; text-align:right;">${fmt(r.paidThisMonth)}</td>
+          <td style="padding:6px 8px; border:1px solid #ccc; text-align:right;">${fmt(r.diff)}</td>
+        </tr>
+      `).join('')
+    : '<tr><td colspan="5" style="padding:6px 8px; border:1px solid #ccc;">Пусто</td></tr>';
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed; left:-9999px; top:0; background:#fff; padding:20px; width:720px; font-family:Arial, sans-serif; color:#000;';
+  container.innerHTML = `
+    <h2 style="margin:0 0 14px;">${escapeHtml(label)}</h2>
+    <table style="border-collapse:collapse; width:100%; font-size:13px;">
+      <thead>
+        <tr style="background:#f0f0f0;">
+          <th style="padding:6px 8px; border:1px solid #ccc; text-align:left;">Дата</th>
+          <th style="padding:6px 8px; border:1px solid #ccc; text-align:left;">Наименования</th>
+          <th style="padding:6px 8px; border:1px solid #ccc;">Должны</th>
+          <th style="padding:6px 8px; border:1px solid #ccc;">Отдали в этом месяце</th>
+          <th style="padding:6px 8px; border:1px solid #ccc;">Разница</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  document.body.appendChild(container);
+  html2canvas(container, { scale: 2 }).then((canvas) => {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+    const margin = 20;
+    const pageWidth = pdf.internal.pageSize.getWidth() - margin * 2;
+    const pageHeight = pdf.internal.pageSize.getHeight() - margin * 2;
+    const imgWidth = pageWidth;
+    const imgHeight = canvas.height * imgWidth / canvas.width;
+    const imgData = canvas.toDataURL('image/png');
+    let heightLeft = imgHeight;
+    let position = 0;
+    pdf.addImage(imgData, 'PNG', margin, margin + position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+    while (heightLeft > 0) {
+      position -= pageHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', margin, margin + position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
+    pdf.save(`${label}.pdf`);
+    container.remove();
+  }).catch((err) => {
+    console.error('PDF export failed', err);
+    alert('Не удалось создать PDF — Архив всё равно сохранён.');
+    container.remove();
+  });
 }
-function openArchive() {
-  ensureArchiveModal().classList.remove('hidden');
-  renderArchiveList();
-}
-function closeArchive() {
-  if (archiveModalEl) archiveModalEl.classList.add('hidden');
-}
-function renderArchiveList() {
-  const body = document.getElementById('archiveBody');
-  if (!body) return;
+
+// ---------- archive page (archive.html) ----------
+// Read-only — visible to everyone (same level as История), not gated
+// behind state.isAdmin like Settings/Новый месяц are. Its own page rather
+// than a modal — same reasoning as История being history.html and not a
+// dialog over index.html.
+
+function renderArchivePage() {
+  const panel = document.getElementById('archivePanel');
+  if (!panel) return;
   const periods = getPeriods().slice().sort((a, b) => b.closedAt.localeCompare(a.closedAt));
-  body.innerHTML = periods.length
+  panel.innerHTML = periods.length
     ? `<div id="archiveList">${periods.map((p) => `
         <button type="button" class="archive-period-btn" data-open-period="${p.id}">
           <span>${escapeHtml(p.label)}</span>
@@ -984,15 +1027,15 @@ function renderArchiveList() {
         </button>
       `).join('')}</div>`
     : '<div class="empty-hint">Пока нет закрытых месяцев — они появятся здесь после «Перейти к новому месяцу».</div>';
-  body.querySelectorAll('[data-open-period]').forEach((btn) => {
+  panel.querySelectorAll('[data-open-period]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const period = periods.find((p) => p.id === btn.dataset.openPeriod);
-      if (period) renderArchivePeriod(period);
+      if (period) renderArchivePeriodView(period);
     });
   });
 }
-function renderArchivePeriod(period) {
-  const body = document.getElementById('archiveBody');
+function renderArchivePeriodView(period) {
+  const panel = document.getElementById('archivePanel');
   const rows = period.snapshot.length
     ? period.snapshot.map((r) => `
         <tr>
@@ -1004,8 +1047,11 @@ function renderArchivePeriod(period) {
         </tr>
       `).join('')
     : `<tr><td colspan="5" class="empty-hint">Пусто</td></tr>`;
-  body.innerHTML = `
-    <button type="button" class="btn btn-secondary" id="archiveBackBtn" style="margin-bottom:14px;">← К списку месяцев</button>
+  panel.innerHTML = `
+    <div class="panel-head">
+      <h2>${escapeHtml(period.label)}</h2>
+      <button type="button" class="btn btn-secondary" id="archiveBackBtn">← К списку месяцев</button>
+    </div>
     <table class="data-table expense-table">
       <thead>
         <tr>
@@ -1019,18 +1065,7 @@ function renderArchivePeriod(period) {
       <tbody>${rows}</tbody>
     </table>
   `;
-  document.getElementById('archiveBackBtn').addEventListener('click', renderArchiveList);
-}
-function initArchiveButton() {
-  const btn = document.getElementById('archiveBtn');
-  if (!btn) return;
-  btn.addEventListener('click', openArchive);
-  // Visible to every signed-in user, not just admins, so this can't live
-  // inside setupGlobalEvents() — that whole function early-returns for
-  // non-admins.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && archiveModalEl && !archiveModalEl.classList.contains('hidden')) closeArchive();
-  });
+  document.getElementById('archiveBackBtn').addEventListener('click', renderArchivePage);
 }
 
 // ---------- settings modal ----------
@@ -1516,14 +1551,15 @@ function setupGlobalEvents() {
   document.getElementById('settingsBtn').addEventListener('click', openSettings);
   document.getElementById('newMonthBtn').addEventListener('click', () => {
     const label = monthYearLabel(todayStr());
-    if (!confirm(`Перейти к новому месяцу? Текущая таблица (${label}) сохранится в Архиве как есть, «Должны» у строк не изменится, «Отдали в этом месяце» начнёт считаться заново.`)) return;
-    startNewMonth();
+    if (!confirm(`Перейти к новому месяцу? Текущая таблица (${label}) сохранится в Архиве как есть и скачается как PDF, «Должны» у строк не изменится, «Отдали в этом месяце» начнёт считаться заново.`)) return;
+    const entry = startNewMonth();
     renderAll();
     // The live table deliberately doesn't change anything right away (today's
     // payments still count toward the month being closed — periodLowerBound
     // only kicks in starting tomorrow), so without this a successful click
     // looks exactly like a dead button: confirm, then nothing visibly happens.
-    alert(`Сохранено в Архив: «${label}». «Отдали в этом месяце» в этой таблице начнёт считаться заново с завтрашнего дня — сегодняшние платежи ещё учтены в закрытом месяце.`);
+    alert(`Сохранено в Архив: «${label}». Сейчас скачается PDF. «Отдали в этом месяце» в этой таблице начнёт считаться заново с завтрашнего дня — сегодняшние платежи ещё учтены в закрытом месяце.`);
+    downloadMonthPdf(entry.label, entry.snapshot);
   });
   cancelBtn.addEventListener('click', () => {
     newRowForm.reset();
@@ -1892,6 +1928,7 @@ function showAuthGate() {
 function renderCurrentPage() {
   if (document.getElementById('methodsRow')) renderAll();
   if (document.getElementById('historyList')) renderHistoryPage();
+  if (document.getElementById('archivePanel')) renderArchivePage();
 }
 
 function onSnapshotError(err) {
@@ -1959,7 +1996,7 @@ function enterApp(authUid, isAdmin) {
     const app = document.getElementById('app');
     if (app) app.classList.remove('hidden');
     initLogoutButton();
-    if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); initArchiveButton(); setupGlobalEvents(); }
+    if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); setupGlobalEvents(); }
   });
 }
 
