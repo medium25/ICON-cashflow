@@ -1029,6 +1029,58 @@ function fmtRuDate(iso) {
   const [y, m, d] = iso.split('-');
   return `${d}.${m}.${y}`;
 }
+let archiveMenuEl = null;
+let openArchiveMenuPeriodId = null;
+function ensureArchiveMenuEl() {
+  if (!archiveMenuEl) {
+    archiveMenuEl = document.createElement('div');
+    archiveMenuEl.className = 'row-menu hidden';
+    document.body.appendChild(archiveMenuEl);
+  }
+  return archiveMenuEl;
+}
+function renderArchiveCardMenu(periods) {
+  const menu = ensureArchiveMenuEl();
+  if (!openArchiveMenuPeriodId) { menu.classList.add('hidden'); return; }
+  const period = periods.find((p) => p.id === openArchiveMenuPeriodId);
+  const toggleBtn = document.querySelector(`[data-archive-menu-toggle="${openArchiveMenuPeriodId}"]`);
+  if (!period || !toggleBtn) { openArchiveMenuPeriodId = null; menu.classList.add('hidden'); return; }
+  menu.innerHTML = `
+    <button data-rename-period>✎ Переименовать</button>
+    <button data-delete-period class="danger">✕ Удалить</button>
+  `;
+  menu.classList.remove('hidden');
+  const rect = toggleBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${window.innerWidth - rect.right}px`;
+  menu.querySelector('[data-rename-period]').addEventListener('click', () => {
+    openArchiveMenuPeriodId = null;
+    const next = prompt('Новое название:', period.label);
+    if (next === null || !next.trim()) { renderArchivePage(); return; }
+    save(STORAGE.periods, getPeriods().map((p) => p.id === period.id ? { ...p, label: next.trim() } : p));
+    renderArchivePage();
+  });
+  menu.querySelector('[data-delete-period]').addEventListener('click', () => {
+    openArchiveMenuPeriodId = null;
+    if (!confirm(`Удалить «${period.label}» из архива? Это не отменить.`)) { renderArchivePage(); return; }
+    save(STORAGE.periods, getPeriods().filter((p) => p.id !== period.id));
+    renderArchivePage();
+  });
+}
+// Registered once (top-level — app.js runs once per page load) rather than
+// inside setupGlobalEvents(), which early-returns for non-admins and only
+// ever runs on index.html; this menu only exists on archive.html and its
+// toggle button is already admin-gated in the markup below.
+document.addEventListener('click', (e) => {
+  if (openArchiveMenuPeriodId && !e.target.closest('.row-menu') && !e.target.closest('[data-archive-menu-toggle]')) {
+    openArchiveMenuPeriodId = null;
+    renderArchivePage();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && openArchiveMenuPeriodId) { openArchiveMenuPeriodId = null; renderArchivePage(); }
+});
+
 function renderArchivePage() {
   const panel = document.getElementById('archivePanel');
   if (!panel) return;
@@ -1038,12 +1090,14 @@ function renderArchivePage() {
         const color = ARCHIVE_CARD_COLORS[i % ARCHIVE_CARD_COLORS.length];
         const due = p.snapshot.reduce((s, r) => s + r.due, 0);
         const paid = p.snapshot.reduce((s, r) => s + r.paidThisMonth, 0);
+        const left = due - paid;
         const pct = due > 0 ? Math.min(100, Math.round(paid / due * 100)) : 0;
         return `
         <div class="archive-card" style="background:${color.bg};" data-open-period="${p.id}">
-          ${state.isAdmin ? `<button type="button" class="archive-card-menu" data-delete-period="${p.id}" title="Удалить">⋮</button>` : ''}
+          ${state.isAdmin ? `<button type="button" class="archive-card-menu" data-archive-menu-toggle="${p.id}" title="Ещё">⋮</button>` : ''}
           <div class="archive-card-title">${escapeHtml(p.label)}</div>
           <div class="archive-card-sub">закрыт ${fmtRuDate(p.closedAt)} · ${p.snapshot.length} статей</div>
+          <div class="archive-card-stats">Долг: <b>${fmt(left)}</b> · Получено: <b>${fmt(paid)}</b></div>
           <div class="archive-card-progress"><div class="archive-card-progress-bar" style="width:${pct}%; background:${color.accent};"></div></div>
         </div>
       `;
@@ -1055,14 +1109,12 @@ function renderArchivePage() {
       if (period) renderArchivePeriodView(period);
     });
   });
-  panel.querySelectorAll('[data-delete-period]').forEach((btn) => {
+  panel.querySelectorAll('[data-archive-menu-toggle]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const period = periods.find((p) => p.id === btn.dataset.deletePeriod);
-      if (!period) return;
-      if (!confirm(`Удалить «${period.label}» из архива? Это не отменить.`)) return;
-      save(STORAGE.periods, getPeriods().filter((p) => p.id !== period.id));
-      renderArchivePage();
+      const id = btn.dataset.archiveMenuToggle;
+      openArchiveMenuPeriodId = openArchiveMenuPeriodId === id ? null : id;
+      renderArchiveCardMenu(periods);
     });
   });
 }
