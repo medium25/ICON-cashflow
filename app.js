@@ -1036,17 +1036,32 @@ function renderArchivePage() {
 }
 function renderArchivePeriodView(period) {
   const panel = document.getElementById('archivePanel');
-  const rows = period.snapshot.length
-    ? period.snapshot.map((r) => `
+  const snapshot = period.snapshot;
+  const diffClass = (d) => d === 0 ? 'diff-zero' : (d > 0 ? 'diff-pos' : 'diff-neg');
+  const rows = snapshot.length
+    ? snapshot.map((r) => `
         <tr>
           <td>${escapeHtml(r.payDate || '—')}</td>
           <td>${r.isDebt ? '<span class="debt-dot" title="Долг"></span>' : ''}${escapeHtml(r.name)}</td>
           <td class="num">${fmt(r.due)}</td>
           <td class="num">${fmt(r.paidThisMonth)}</td>
-          <td class="num"><span class="diff-value ${r.diff === 0 ? 'diff-zero' : (r.diff > 0 ? 'diff-pos' : 'diff-neg')}">${fmt(r.diff)}</span></td>
+          <td class="num"><span class="diff-value ${diffClass(r.diff)}">${fmt(r.diff)}</span></td>
         </tr>
       `).join('')
     : `<tr><td colspan="5" class="empty-hint">Пусто</td></tr>`;
+
+  // Same two-table split as the live page: the main table above, plus a
+  // "Долги" totals-only panel for isDebt-marked rows (it was never a full
+  // duplicate listing on the live page either — just the Итого line).
+  const totalDue = snapshot.reduce((s, r) => s + r.due, 0);
+  const totalPaid = snapshot.reduce((s, r) => s + r.paidThisMonth, 0);
+  const totalDiff = totalDue - totalPaid;
+
+  const debtRows = snapshot.filter((r) => r.isDebt);
+  const debtDue = debtRows.reduce((s, r) => s + r.due, 0);
+  const debtPaid = debtRows.reduce((s, r) => s + r.paidThisMonth, 0);
+  const debtLeft = debtDue - debtPaid;
+
   panel.innerHTML = `
     <div class="panel-head">
       <h2>${escapeHtml(period.label)}</h2>
@@ -1063,7 +1078,39 @@ function renderArchivePeriodView(period) {
         </tr>
       </thead>
       <tbody>${rows}</tbody>
+      ${snapshot.length ? `
+      <tfoot>
+        <tr>
+          <td></td>
+          <td>Итого</td>
+          <td class="num">${fmt(totalDue)}</td>
+          <td class="num">${fmt(totalPaid)}</td>
+          <td class="num"><span class="diff-value ${diffClass(totalDiff)}">${fmt(totalDiff)}</span></td>
+        </tr>
+      </tfoot>` : ''}
     </table>
+    ${debtRows.length ? `
+    <div class="panel" style="margin-top:20px;">
+      <div class="panel-head"><h2>Долги</h2></div>
+      <table class="data-table debt-summary-table">
+        <thead>
+          <tr>
+            <th>Наименования</th>
+            <th class="num">Должны</th>
+            <th class="num">Отдали в этом месяце</th>
+            <th class="num">Осталось</th>
+          </tr>
+        </thead>
+        <tfoot>
+          <tr>
+            <td>Итого</td>
+            <td class="num">${fmt(debtDue)}</td>
+            <td class="num">${fmt(debtPaid)}</td>
+            <td class="num"><span class="diff-value ${diffClass(debtLeft)}">${fmt(debtLeft)}</span></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>` : ''}
   `;
   document.getElementById('archiveBackBtn').addEventListener('click', renderArchivePage);
 }
