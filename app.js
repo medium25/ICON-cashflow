@@ -1096,8 +1096,8 @@ function renderArchivePage() {
         <div class="archive-card" style="background:${color.bg};" data-open-period="${p.id}">
           ${state.isAdmin ? `<button type="button" class="archive-card-menu" data-archive-menu-toggle="${p.id}" title="Ещё">⋮</button>` : ''}
           <div class="archive-card-title">${escapeHtml(p.label)}</div>
-          <div class="archive-card-sub">закрыт ${fmtRuDate(p.closedAt)} · ${p.snapshot.length} статей</div>
-          <div class="archive-card-stats">Долг: <b>${fmt(left)}</b> · Получено: <b>${fmt(paid)}</b></div>
+          <div class="archive-card-sub">закрыт ${fmtRuDate(p.closedAt)}</div>
+          <div class="archive-card-stats">Долг: <b>${fmt(left)}</b></div>
           <div class="archive-card-progress"><div class="archive-card-progress-bar" style="width:${pct}%; background:${color.accent};"></div></div>
         </div>
       `;
