@@ -1515,9 +1515,15 @@ function setupGlobalEvents() {
   });
   document.getElementById('settingsBtn').addEventListener('click', openSettings);
   document.getElementById('newMonthBtn').addEventListener('click', () => {
-    if (!confirm(`Перейти к новому месяцу? Текущая таблица (${monthYearLabel(todayStr())}) сохранится в Архиве как есть, «Должны» у строк не изменится, «Отдали в этом месяце» начнёт считаться заново.`)) return;
+    const label = monthYearLabel(todayStr());
+    if (!confirm(`Перейти к новому месяцу? Текущая таблица (${label}) сохранится в Архиве как есть, «Должны» у строк не изменится, «Отдали в этом месяце» начнёт считаться заново.`)) return;
     startNewMonth();
     renderAll();
+    // The live table deliberately doesn't change anything right away (today's
+    // payments still count toward the month being closed — periodLowerBound
+    // only kicks in starting tomorrow), so without this a successful click
+    // looks exactly like a dead button: confirm, then nothing visibly happens.
+    alert(`Сохранено в Архив: «${label}». «Отдали в этом месяце» в этой таблице начнёт считаться заново с завтрашнего дня — сегодняшние платежи ещё учтены в закрытом месяце.`);
   });
   cancelBtn.addEventListener('click', () => {
     newRowForm.reset();
