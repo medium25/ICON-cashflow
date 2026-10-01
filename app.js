@@ -1015,22 +1015,54 @@ function downloadMonthPdf(label, snapshot) {
 // than a modal — same reasoning as История being history.html and not a
 // dialog over index.html.
 
+// Cycled by index, not by content — just visual variety between cards,
+// same spirit as the reference board's per-project colors.
+const ARCHIVE_CARD_COLORS = [
+  { bg: 'rgba(0, 113, 227, 0.12)', accent: '#0071e3' },
+  { bg: 'rgba(52, 199, 89, 0.14)', accent: '#2fa84f' },
+  { bg: 'rgba(255, 159, 10, 0.16)', accent: '#c97a00' },
+  { bg: 'rgba(175, 82, 222, 0.13)', accent: '#af52de' },
+  { bg: 'rgba(100, 210, 255, 0.16)', accent: '#0a84c4' },
+  { bg: 'rgba(224, 57, 63, 0.12)', accent: '#c22b31' },
+];
+function fmtRuDate(iso) {
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
+}
 function renderArchivePage() {
   const panel = document.getElementById('archivePanel');
   if (!panel) return;
   const periods = getPeriods().slice().sort((a, b) => b.closedAt.localeCompare(a.closedAt));
   panel.innerHTML = periods.length
-    ? `<div id="archiveList">${periods.map((p) => `
-        <button type="button" class="archive-period-btn" data-open-period="${p.id}">
-          <span>${escapeHtml(p.label)}</span>
-          <span class="archive-period-date">закрыт ${(() => { const [y, m, d] = p.closedAt.split('-'); return `${d}.${m}.${y}`; })()}</span>
-        </button>
-      `).join('')}</div>`
+    ? `<div id="archiveList" class="archive-grid">${periods.map((p, i) => {
+        const color = ARCHIVE_CARD_COLORS[i % ARCHIVE_CARD_COLORS.length];
+        const due = p.snapshot.reduce((s, r) => s + r.due, 0);
+        const paid = p.snapshot.reduce((s, r) => s + r.paidThisMonth, 0);
+        const pct = due > 0 ? Math.min(100, Math.round(paid / due * 100)) : 0;
+        return `
+        <div class="archive-card" style="background:${color.bg};" data-open-period="${p.id}">
+          ${state.isAdmin ? `<button type="button" class="archive-card-menu" data-delete-period="${p.id}" title="Удалить">⋮</button>` : ''}
+          <div class="archive-card-title">${escapeHtml(p.label)}</div>
+          <div class="archive-card-sub">закрыт ${fmtRuDate(p.closedAt)} · ${p.snapshot.length} статей</div>
+          <div class="archive-card-progress"><div class="archive-card-progress-bar" style="width:${pct}%; background:${color.accent};"></div></div>
+        </div>
+      `;
+      }).join('')}</div>`
     : '<div class="empty-hint">Пока нет закрытых месяцев — они появятся здесь после «Перейти к новому месяцу».</div>';
-  panel.querySelectorAll('[data-open-period]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const period = periods.find((p) => p.id === btn.dataset.openPeriod);
+  panel.querySelectorAll('[data-open-period]').forEach((card) => {
+    card.addEventListener('click', () => {
+      const period = periods.find((p) => p.id === card.dataset.openPeriod);
       if (period) renderArchivePeriodView(period);
+    });
+  });
+  panel.querySelectorAll('[data-delete-period]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const period = periods.find((p) => p.id === btn.dataset.deletePeriod);
+      if (!period) return;
+      if (!confirm(`Удалить «${period.label}» из архива? Это не отменить.`)) return;
+      save(STORAGE.periods, getPeriods().filter((p) => p.id !== period.id));
+      renderArchivePage();
     });
   });
 }
