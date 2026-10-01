@@ -41,6 +41,7 @@ const STORAGE = {
   rows: 'cf_rows',           // {id, name, due}
   expenses: 'cf_expenses',   // {id, method, name, amount, checked, date, ts, comment, deleted, deletedAt}
   balances: 'cf_balances',   // { "<method>_<date>": {was, income, sources:[{id,label,amount,ts,comment,deleted,deletedAt}]} }
+  periods: 'cf_periods',     // [{id, label, closedAt, snapshot:[{name,payDate,due,paidThisMonth,diff,isDebt}]}] — "Новый месяц" archive, oldest first
 };
 
 const METHODS = ['Наличка', 'Click', 'Терминал'];
@@ -114,8 +115,8 @@ function load(key, fallback) {
 // memory, kept in sync by onSnapshot listeners (see attachSnapshotListeners),
 // so every existing getRows()/getExpenses()/getBalances() call site and every
 // derived-computation helper below keeps working completely unchanged.
-const CACHE = { rows: [], expenses: [], balances: {} };
-const STORAGE_TO_CACHE_KEY = { [STORAGE.rows]: 'rows', [STORAGE.expenses]: 'expenses', [STORAGE.balances]: 'balances' };
+const CACHE = { rows: [], expenses: [], balances: {}, periods: [] };
+const STORAGE_TO_CACHE_KEY = { [STORAGE.rows]: 'rows', [STORAGE.expenses]: 'expenses', [STORAGE.balances]: 'balances', [STORAGE.periods]: 'periods' };
 
 // Guards against the failure mode where a mutation fires before the initial
 // onSnapshot data has arrived: CACHE would still be empty, and since save()
@@ -124,9 +125,9 @@ const STORAGE_TO_CACHE_KEY = { [STORAGE.rows]: 'rows', [STORAGE.expenses]: 'expe
 // per-doc the first time attachSnapshotListeners() hears back from Firestore;
 // enterApp() also waits on it before wiring up any mutating UI, so this is
 // a backstop for anything that could still slip through.
-const snapshotsLoaded = { rows: false, expenses: false, balances: false };
+const snapshotsLoaded = { rows: false, expenses: false, balances: false, periods: false };
 function allDataLoaded() {
-  return snapshotsLoaded.rows && snapshotsLoaded.expenses && snapshotsLoaded.balances;
+  return snapshotsLoaded.rows && snapshotsLoaded.expenses && snapshotsLoaded.balances && snapshotsLoaded.periods;
 }
 
 // Undo (Cmd/Ctrl+Z), up to UNDO_STACK_LIMIT steps back — save()/
@@ -238,6 +239,7 @@ function save(key, value) {
 function getRows() { return CACHE.rows; }
 function getExpenses() { return CACHE.expenses; }
 function getBalances() { return CACHE.balances; }
+function getPeriods() { return CACHE.periods; }
 
 // Pure calendar-string arithmetic, all in UTC (both parse and format), so it
 // never shifts by a day depending on the browser's local timezone offset —
@@ -247,6 +249,26 @@ function addDays(dateStr, delta) {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + delta);
   return dt.toISOString().slice(0, 10);
+}
+
+const RU_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+function monthYearLabel(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  return `${RU_MONTHS[m - 1]} ${y}`;
+}
+
+// The date the currently-open period (since the last "Новый месяц" click)
+// actually starts counting from, as of a given day — null means "from the
+// beginning" (no period has ever been closed yet, or asOfDate falls before
+// the very first close). Finds the latest period whose closedAt is
+// strictly before asOfDate; its snapshot covers everything up to and
+// including closedAt, so the next period starts the day after.
+function periodLowerBound(asOfDate) {
+  let bound = null;
+  getPeriods().forEach((p) => {
+    if (p.closedAt < asOfDate && (!bound || p.closedAt > bound)) bound = p.closedAt;
+  });
+  return bound ? addDays(bound, 1) : null;
 }
 
 // true if this method has any recorded activity (a saved balance entry or a
@@ -439,16 +461,19 @@ function paidTodayByName(name, date) {
     .filter(e => e.name.trim() === name.trim() && e.date === date && activeAsOf(e, date))
     .reduce((s, e) => s + e.amount, 0);
 }
-// How much a given debt-row name has been paid since the last "Новый
-// месяц" click, across all 3 methods, as of a given date. NOT bound to the
-// real calendar month — it used to reset itself the moment the calendar
-// rolled to a new month (even with nothing clicked), which is exactly the
-// "почему обнулилось само" complaint. The only thing that zeroes this now
-// is startNewMonth() soft-deleting the expenses; a plain calendar rollover
-// with no click leaves it exactly as it was.
+// How much a given debt-row name has been paid in the currently-open
+// period (since the last "Новый месяц" close, if any), across all 3
+// methods, as of a given date. NOT bound to the real calendar month — it
+// used to reset itself the moment the calendar rolled to a new month
+// (even with nothing clicked), which is exactly the "почему обнулилось
+// само" complaint. The only thing that zeroes this now is an actual
+// "Новый месяц" close advancing periodLowerBound(); a plain calendar
+// rollover with no click leaves it exactly as it was. Expenses are never
+// touched by closing a period — "Новый месяц" only snapshots+archives.
 function paidThisMonthByName(name, asOfDate) {
+  const lowerBound = periodLowerBound(asOfDate);
   return getExpenses()
-    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && activeAsOf(e, asOfDate))
+    .filter(e => e.name.trim() === name.trim() && e.date <= asOfDate && (!lowerBound || e.date >= lowerBound) && activeAsOf(e, asOfDate))
     .reduce((s, e) => s + e.amount, 0);
 }
 
@@ -481,13 +506,28 @@ function toggleRowDebt(id) {
 function deleteRow(id) {
   save(STORAGE.rows, getRows().filter(r => r.id !== id));
 }
-// "Новый месяц" — soft-deletes every active expense so "Отдали в этом месяце"
-// zeroes out for all rows, while История still keeps the full record
+// "Новый месяц" — freezes a snapshot of the current table (Должны/Отдали/
+// Разница exactly as they stand right now, immune to later edits — e.g.
+// double-clicking "Должны" next month must never retroactively change an
+// already-archived month) into cashflow/periods, then advances
+// periodLowerBound() so the live "Отдали в этом месяце" starts counting
+// fresh. Expenses themselves are never touched — nothing is deleted,
+// nothing to accidentally lose or need restoring from История.
 function startNewMonth() {
-  snapshotExpensesForUndo();
-  const list = getExpenses();
-  list.forEach(e => { if (!e.deleted) { e.deleted = true; e.deletedAt = Date.now(); } });
-  save(STORAGE.expenses, list);
+  const today = todayStr();
+  const snapshot = getRows().map(r => {
+    const paidThisMonth = paidThisMonthByName(r.name, today);
+    return {
+      name: r.name,
+      payDate: r.payDate || '',
+      due: r.due,
+      paidThisMonth,
+      diff: r.due - paidThisMonth,
+      isDebt: !!r.isDebt,
+    };
+  });
+  const entry = { id: uid(), label: monthYearLabel(today), closedAt: today, snapshot };
+  save(STORAGE.periods, [...getPeriods(), entry]);
 }
 function moveRow(id, toIndex) {
   snapshotRowsForUndo();
@@ -890,6 +930,100 @@ function renderRowMenu() {
     if (!confirm(`Удалить «${row.name}»?`)) { renderAll(); return; }
     deleteRow(row.id);
     renderAll();
+  });
+}
+
+// ---------- archive modal ----------
+// Read-only — visible to everyone (same level as История), not gated
+// behind state.isAdmin like Settings/Новый месяц are.
+
+let archiveModalEl = null;
+function ensureArchiveModal() {
+  if (!archiveModalEl) {
+    archiveModalEl = document.createElement('div');
+    archiveModalEl.className = 'modal-overlay hidden';
+    archiveModalEl.innerHTML = `
+      <div class="modal modal-lg">
+        <div class="modal-head">
+          <h2>Архив</h2>
+          <button type="button" class="btn-icon" data-close-archive title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body" id="archiveBody"></div>
+      </div>
+    `;
+    document.body.appendChild(archiveModalEl);
+    archiveModalEl.addEventListener('click', (e) => {
+      if (e.target === archiveModalEl) closeArchive();
+    });
+    archiveModalEl.querySelector('[data-close-archive]').addEventListener('click', closeArchive);
+  }
+  return archiveModalEl;
+}
+function openArchive() {
+  ensureArchiveModal().classList.remove('hidden');
+  renderArchiveList();
+}
+function closeArchive() {
+  if (archiveModalEl) archiveModalEl.classList.add('hidden');
+}
+function renderArchiveList() {
+  const body = document.getElementById('archiveBody');
+  if (!body) return;
+  const periods = getPeriods().slice().sort((a, b) => b.closedAt.localeCompare(a.closedAt));
+  body.innerHTML = periods.length
+    ? `<div id="archiveList">${periods.map((p) => `
+        <button type="button" class="archive-period-btn" data-open-period="${p.id}">
+          <span>${escapeHtml(p.label)}</span>
+          <span class="archive-period-date">закрыт ${(() => { const [y, m, d] = p.closedAt.split('-'); return `${d}.${m}.${y}`; })()}</span>
+        </button>
+      `).join('')}</div>`
+    : '<div class="empty-hint">Пока нет закрытых месяцев — они появятся здесь после «Перейти к новому месяцу».</div>';
+  body.querySelectorAll('[data-open-period]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const period = periods.find((p) => p.id === btn.dataset.openPeriod);
+      if (period) renderArchivePeriod(period);
+    });
+  });
+}
+function renderArchivePeriod(period) {
+  const body = document.getElementById('archiveBody');
+  const rows = period.snapshot.length
+    ? period.snapshot.map((r) => `
+        <tr>
+          <td>${escapeHtml(r.payDate || '—')}</td>
+          <td>${r.isDebt ? '<span class="debt-dot" title="Долг"></span>' : ''}${escapeHtml(r.name)}</td>
+          <td class="num">${fmt(r.due)}</td>
+          <td class="num">${fmt(r.paidThisMonth)}</td>
+          <td class="num"><span class="diff-value ${r.diff === 0 ? 'diff-zero' : (r.diff > 0 ? 'diff-pos' : 'diff-neg')}">${fmt(r.diff)}</span></td>
+        </tr>
+      `).join('')
+    : `<tr><td colspan="5" class="empty-hint">Пусто</td></tr>`;
+  body.innerHTML = `
+    <button type="button" class="btn btn-secondary" id="archiveBackBtn" style="margin-bottom:14px;">← К списку месяцев</button>
+    <table class="data-table expense-table">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Наименования</th>
+          <th class="num">Должны</th>
+          <th class="num">Отдали в этом месяце</th>
+          <th class="num">Разница</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  document.getElementById('archiveBackBtn').addEventListener('click', renderArchiveList);
+}
+function initArchiveButton() {
+  const btn = document.getElementById('archiveBtn');
+  if (!btn) return;
+  btn.addEventListener('click', openArchive);
+  // Visible to every signed-in user, not just admins, so this can't live
+  // inside setupGlobalEvents() — that whole function early-returns for
+  // non-admins.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && archiveModalEl && !archiveModalEl.classList.contains('hidden')) closeArchive();
   });
 }
 
@@ -1375,7 +1509,7 @@ function setupGlobalEvents() {
   });
   document.getElementById('settingsBtn').addEventListener('click', openSettings);
   document.getElementById('newMonthBtn').addEventListener('click', () => {
-    if (!confirm('Перейти к новому месяцу? «Отдали в этом месяце» обнулится для всех статей (история сохранится).')) return;
+    if (!confirm(`Перейти к новому месяцу? Текущая таблица (${monthYearLabel(todayStr())}) сохранится в Архиве как есть, «Должны» у строк не изменится, «Отдали в этом месяце» начнёт считаться заново.`)) return;
     startNewMonth();
     renderAll();
   });
@@ -1776,6 +1910,11 @@ function attachSnapshotListeners() {
       markLoaded('balances');
       renderCurrentPage();
     }, onSnapshotError);
+    db.collection('cashflow').doc('periods').onSnapshot((doc) => {
+      CACHE.periods = (doc.data() && doc.data().data) || [];
+      markLoaded('periods');
+      renderCurrentPage();
+    }, onSnapshotError);
   });
 }
 
@@ -1808,7 +1947,7 @@ function enterApp(authUid, isAdmin) {
     const app = document.getElementById('app');
     if (app) app.classList.remove('hidden');
     initLogoutButton();
-    if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); setupGlobalEvents(); }
+    if (document.getElementById('methodsRow')) { setDateDisplay(); initDatePicker(); initArchiveButton(); setupGlobalEvents(); }
   });
 }
 

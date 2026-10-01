@@ -1148,3 +1148,22 @@ body::before {
 }
 .phone-input-row .auth-input { flex: 1; width: auto; margin-bottom: 0; }
 .phone-readonly { flex: 1; width: auto; margin-bottom: 0; display: flex; align-items: center; color: var(--text-muted); }
+
+.archive-period-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-tint);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.archive-period-btn:hover { background: var(--border); }
+.archive-period-date { font-size: 12px; font-weight: 400; color: var(--text-muted); }
