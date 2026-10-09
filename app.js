@@ -1879,106 +1879,6 @@ function updateStaticAdminLocks() {
   if (newRowForm && past) newRowForm.classList.add('hidden');
 }
 
-// ---------- TEMPORARY: Дониёр full history (bottom of index.html) ----------
-// Everything tied to the name — current debt rows, every archived month's
-// frozen figures, and every single payment (deleted ones included, struck
-// through). Remove with #donyorPanel in index.html when no longer needed.
-function renderDonyorHistory() {
-  const panel = document.getElementById('donyorPanel');
-  if (!panel) return;
-  const norm = (s) => (s || '').toLowerCase().replace(/ё/g, 'е');
-  const matches = (name) => norm(name).includes('дониер');
-  const diffClass = (d) => d === 0 ? 'diff-zero' : (d > 0 ? 'diff-pos' : 'diff-neg');
-  const monthLabel = (ym) => monthYearLabel(`${ym}-01`);
-
-  const liveRows = getRows().filter((r) => matches(r.name));
-  const periods = getPeriods().slice().sort((a, b) => a.closedAt.localeCompare(b.closedAt));
-  const expenses = getExpenses()
-    .filter((e) => matches(e.name))
-    .slice()
-    .sort((a, b) => a.date.localeCompare(b.date) || (a.ts || 0) - (b.ts || 0));
-
-  const sumActive = (name) => expenses
-    .filter((e) => e.name.trim() === name.trim() && !e.deleted)
-    .reduce((s, e) => s + e.amount, 0);
-
-  const liveHtml = liveRows.length ? liveRows.map((r) => {
-    const paidPeriod = paidThisMonthByName(r.name, todayStr());
-    return `<tr>
-      <td>${escapeHtml(r.name)}</td>
-      <td>${escapeHtml(r.payDate || '—')}</td>
-      <td class="num">${fmt(r.due)}</td>
-      <td class="num">${fmt(paidPeriod)}</td>
-      <td class="num"><span class="diff-value ${diffClass(r.due - paidPeriod)}">${fmt(r.due - paidPeriod)}</span></td>
-      <td class="num">${fmt(sumActive(r.name))}</td>
-    </tr>`;
-  }).join('') : '<tr><td colspan="6" class="empty-hint">В текущей таблице строк нет</td></tr>';
-
-  const archivedHtml = periods.map((p) => {
-    const rows = p.snapshot.filter((r) => matches(r.name));
-    if (!rows.length) return '';
-    return rows.map((r) => `<tr>
-      <td>${escapeHtml(p.label)}${p.retroactive ? ' <span class="archive-period-date">(добавлен задним числом)</span>' : ''}</td>
-      <td>${escapeHtml(r.name)}</td>
-      <td class="num">${fmt(r.due)}</td>
-      <td class="num">${fmt(r.paidThisMonth)}</td>
-      <td class="num"><span class="diff-value ${diffClass(r.diff)}">${fmt(r.diff)}</span></td>
-    </tr>`).join('');
-  }).join('') || '<tr><td colspan="5" class="empty-hint">В архивных месяцах строк нет</td></tr>';
-
-  const byMonth = {};
-  expenses.forEach((e) => {
-    const ym = e.date.slice(0, 7);
-    const m = byMonth[ym] || (byMonth[ym] = { count: 0, active: 0, deleted: 0 });
-    m.count += 1;
-    if (e.deleted) m.deleted += e.amount; else m.active += e.amount;
-  });
-  const monthsHtml = Object.keys(byMonth).sort().map((ym) => `<tr>
-    <td>${escapeHtml(monthLabel(ym))}</td>
-    <td class="num">${byMonth[ym].count}</td>
-    <td class="num">${fmt(byMonth[ym].active)}</td>
-    <td class="num">${byMonth[ym].deleted ? fmt(byMonth[ym].deleted) : '—'}</td>
-  </tr>`).join('') || '<tr><td colspan="4" class="empty-hint">Платежей нет</td></tr>';
-
-  const totalActive = expenses.filter((e) => !e.deleted).reduce((s, e) => s + e.amount, 0);
-  const totalDeleted = expenses.filter((e) => e.deleted).reduce((s, e) => s + e.amount, 0);
-
-  const paymentsHtml = expenses.map((e) => `<tr class="${e.deleted ? 'row-deleted' : ''}">
-    <td>${fmtRuDate(e.date)}</td>
-    <td>${escapeHtml(e.name)}</td>
-    <td>${escapeHtml(e.method)}</td>
-    <td class="num">${fmt(e.amount)}</td>
-    <td>${e.deleted ? `удалён ${e.deletedAt ? fmtRuDate(tsDateStr(e.deletedAt)) : ''}` : 'активен'}</td>
-    <td>${escapeHtml(e.comment || '')}</td>
-  </tr>`).join('') || '<tr><td colspan="6" class="empty-hint">Платежей нет</td></tr>';
-
-  panel.innerHTML = `
-    <div class="panel-head"><h2>Дониёр — вся история (временно)</h2></div>
-
-    <h3 class="donyor-sub">Строки долга сейчас</h3>
-    <table class="data-table"><thead><tr>
-      <th>Наименование</th><th>Дата</th><th class="num">Должны</th>
-      <th class="num">Отдали в текущем периоде</th><th class="num">Разница</th><th class="num">Отдали всего (активные)</th>
-    </tr></thead><tbody>${liveHtml}</tbody></table>
-
-    <h3 class="donyor-sub">По закрытым месяцам (замороженные цифры)</h3>
-    <table class="data-table"><thead><tr>
-      <th>Месяц</th><th>Строка</th><th class="num">Должны</th><th class="num">Отдали</th><th class="num">Разница</th>
-    </tr></thead><tbody>${archivedHtml}</tbody></table>
-
-    <h3 class="donyor-sub">Платежи по календарным месяцам</h3>
-    <table class="data-table"><thead><tr>
-      <th>Месяц</th><th class="num">Платежей</th><th class="num">Сумма (активные)</th><th class="num">Сумма (удалённые)</th>
-    </tr></thead><tbody>${monthsHtml}</tbody>
-    <tfoot><tr><td>Итого</td><td class="num">${expenses.length}</td><td class="num">${fmt(totalActive)}</td><td class="num">${totalDeleted ? fmt(totalDeleted) : '—'}</td></tr></tfoot></table>
-
-    <h3 class="donyor-sub">Все платежи (включая удалённые)</h3>
-    <table class="data-table"><thead><tr>
-      <th>Дата</th><th>Название</th><th>Способ</th><th class="num">Сумма</th><th>Статус</th><th>Комментарий</th>
-    </tr></thead><tbody>${paymentsHtml}</tbody></table>
-  `;
-}
-
 function renderAll() {
   balanceEntryCache.clear();
   renderViewDateBanner();
@@ -1987,7 +1887,6 @@ function renderAll() {
   renderMethods();
   renderExpenseTable();
   renderDebtSummary();
-  renderDonyorHistory();
   renderKpis();
   renderRowMenu();
 }
